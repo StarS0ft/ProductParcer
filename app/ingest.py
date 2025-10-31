@@ -1,71 +1,36 @@
-﻿from typing import Iterable
-import csv
-import io
-import os
-import re
-import httpx
+﻿import os, re, csv, io, httpx
+from html import unescape
+from typing import Iterable
 
 CSV_INDEX_URL = "https://hefitness.se/csv/"
 
-async def _download(client, url: str) -> bytes:
-    r = await client.get(url)
-    r.raise_for_status()
-    return r.content
-
-async def _find_csv_from_index(client, base_url: str) -> bytes:
-    # ensure trailing slash
-    if not base_url.endswith("/"):
-        base_url = base_url + "/"
-    html = (await _download(client, base_url)).decode("utf-8", "replace")
-
-    # find first csv-like href (case-insensitive), allow query strings
-    m = re.search(r'href=["\']([^"\']+\.csv(?:\?[^"\']*)?)["\']', html, re.I)
-    if not m:
-        # try upper-case .CSV or text-only autoindex
-        m = re.search(r'>([^<]+\.csv(?:\?[^<]*)?)<', html, re.I)
-    if not m:
-        raise RuntimeError(f"No .csv links found at index {base_url}")
-
-    href = m.group(1)
-    if not href.startswith("http"):
-        if href.startswith("/"):
-            # absolute path on same host
-            from urllib.parse import urlsplit
-            sp = urlsplit(base_url)
-            href = f"{sp.scheme}://{sp.netloc}{href}"
-        else:
-            href = base_url + href
-    return await _download(client, href)
-
 async def fetch_csv_bytes() -> bytes:
-    """
-    Priority:
-      1) CSV_URL env var:
-         - if it ends with .csv => download it
-         - else treat as index and pick the first .csv link
-      2) local products.csv
-      3) index at CSV_INDEX_URL
-    """
-    csv_url = os.getenv("CSV_URL")
-    async with httpx.AsyncClient(timeout=30, verify=False, follow_redirects=True,
-                                 headers={"User-Agent":"Mozilla/5.0"}) as client:
-        if csv_url:
-            if csv_url.lower().endswith(".csv"):
-                return await _download(client, csv_url)
-            # treat as index directory
-            return await _find_csv_from_index(client, csv_url)
+    csv_url = os.getenv("CSV_URL", CSV_INDEX_URL)
 
-        if os.path.exists("products.csv"):
-            with open("products.csv", "rb") as f:
-                return f.read()
+    async with httpx.AsyncClient(timeout=30, follow_redirects=True, headers={"User-Agent":"Mozilla/5.0"}) as client:
+        r = await client.get(csv_url)
+        r.raise_for_status()
+        html = r.text
 
-        # default index crawl
-        return await _find_csv_from_index(client, CSV_INDEX_URL)
+    # Extract only the <pre>...</pre> block that contains CSV-like text
+    m = re.search(r"<pre[^>]*>(.*?)</pre>", html, flags=re.DOTALL | re.IGNORECASE)
+    if not m:
+        raise RuntimeError("No <pre> block found at CSV page")
+
+    pre = m.group(1)
+
+    # Strip all HTML tags that are injected inside cells and decode entities
+    cleaned = re.sub(r"<.*?>", "", pre)
+    cleaned = unescape(cleaned).strip()
+
+    # Basic sanity check
+    if "Artnr" not in cleaned or ";" not in cleaned:
+        raise RuntimeError("CSV header not detected after cleaning")
+
+    return cleaned.encode("utf-8")
 
 def parse_semicolon_csv(content: bytes) -> Iterable[dict]:
-    s = content.decode("utf-8", errors="replace")
-    reader = csv.DictReader(io.StringIO(s), delimiter=";")
-    if not reader.fieldnames:
-        raise RuntimeError("CSV header missing or wrong delimiter; expected semicolons ';'.")
+    text = content.decode("utf-8", errors="replace")
+    reader = csv.DictReader(io.StringIO(text), delimiter=";")
     for row in reader:
-        yield row
+        yield {k: (v or "").strip() for k, v in row.items()}
