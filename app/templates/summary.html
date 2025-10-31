@@ -1,0 +1,23 @@
+﻿<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>AgentMaMa.ai Feed Summary</title>
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; max-width: 800px; margin: 40px auto; }
+    .pill { display:inline-block; padding:6px 10px; border-radius:9999px; background:#f2f4f7; }
+    a { text-decoration:none; }
+  </style>
+</head>
+<body>
+  <h1>HEfitness feed summary</h1>
+  <p><span class="pill">Products: <b>{{ total }}</b></span>
+     <span class="pill">Flagged: <b style="color:#b50000">{{ flagged }}</b></span></p>
+  <p>Actions:</p>
+  <ul>
+    <li><a href="/ingest">POST /ingest</a> - run ingestion</li>
+    <li><a href="/summary">GET /summary</a> - JSON summary</li>
+    <li><a href="/products?has_issues=true">GET /products?has_issues=true</a> - items with issues</li>
+  </ul>
+</body>
+</html>
