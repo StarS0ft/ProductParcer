@@ -1,33 +1,40 @@
-﻿import os, re, csv, io, httpx
-from html import unescape
+﻿import os, re, httpx, csv, io
 from typing import Iterable
+from html import unescape
 
 CSV_INDEX_URL = "https://hefitness.se/csv/"
 
 async def fetch_csv_bytes() -> bytes:
-    csv_url = os.getenv("CSV_URL", CSV_INDEX_URL)
+    url = os.getenv("CSV_URL", CSV_INDEX_URL)
 
-    async with httpx.AsyncClient(timeout=30, follow_redirects=True, headers={"User-Agent":"Mozilla/5.0"}) as client:
-        r = await client.get(csv_url)
+    async with httpx.AsyncClient(timeout=30, follow_redirects=True, verify=False,
+                                 headers={"User-Agent": "Mozilla/5.0"}) as client:
+        r = await client.get(url)
         r.raise_for_status()
         html = r.text
 
-    # Extract only the <pre>...</pre> block that contains CSV-like text
-    m = re.search(r"<pre[^>]*>(.*?)</pre>", html, flags=re.DOTALL | re.IGNORECASE)
-    if not m:
-        raise RuntimeError("No <pre> block found at CSV page")
+    # extract body only
+    body = re.search(r"<body[^>]*>(.*?)</body>", html, flags=re.I|re.S)
+    if not body:
+        raise RuntimeError("No <body> tag found")
 
-    pre = m.group(1)
+    text = body.group(1)
 
-    # Strip all HTML tags that are injected inside cells and decode entities
-    cleaned = re.sub(r"<.*?>", "", pre)
-    cleaned = unescape(cleaned).strip()
+    # remove ONLY <pre...> and </pre> tags (not other HTML)
+    text = re.sub(r"<pre[^>]*>", "", text, flags=re.I)
+    text = re.sub(r"</pre>", "", text, flags=re.I)
 
-    # Basic sanity check
-    if "Artnr" not in cleaned or ";" not in cleaned:
-        raise RuntimeError("CSV header not detected after cleaning")
+    # decode entities (&nbsp;)
+    text = unescape(text)
 
-    return cleaned.encode("utf-8")
+    # now strip leftover html tags (simple)
+    text = re.sub(r"<[^>]+>", "", text)
+
+    # normalize newlines
+    text = text.replace("\r","").strip()
+
+    return text.encode("utf-8")
+
 
 def parse_semicolon_csv(content: bytes) -> Iterable[dict]:
     text = content.decode("utf-8", errors="replace")
