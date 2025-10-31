@@ -1,0 +1,80 @@
+﻿{% extends "base.html" %}
+{% block content %}
+<div class="mb-4">
+  <a href="/" class="px-3 py-1.5 rounded-lg bg-slate-200 hover:bg-slate-300 text-sm">Back to Main Menu</a>
+</div>
+
+<div class="rounded-2xl bg-white shadow p-6">
+  <div class="flex items-center justify-between mb-4">
+    <h2 class="text-lg font-medium">
+      {{ "Products with Issues" if has_issues else "All Products" }}
+    </h2>
+    <div class="text-sm text-slate-500">Page {{ page }} of {{ pages }}</div>
+  </div>
+
+  <div class="overflow-x-auto">
+    <table class="min-w-full text-sm">
+      <thead class="text-left bg-slate-100">
+        <tr>
+          <th class="px-3 py-2">Artnr</th>
+          <th class="px-3 py-2">Category</th>
+          <th class="px-3 py-2">Name</th>
+          <th class="px-3 py-2">Manufacturer</th>
+          <th class="px-3 py-2">Model</th>
+          <th class="px-3 py-2">EAN</th>
+          <th class="px-3 py-2">Stock</th>
+          <th class="px-3 py-2">Price</th>
+          <th class="px-3 py-2">Shipping</th>
+          <th class="px-3 py-2">Flags</th>
+          <th class="px-3 py-2">URL</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in items %}
+        <tr class="border-b last:border-0">
+          <td class="px-3 py-2 whitespace-nowrap">{{ p.artnr or "" }}</td>
+          <td class="px-3 py-2">{{ p.category or "" }}</td>
+          <td class="px-3 py-2">{{ p.name or "" }}</td>
+          <td class="px-3 py-2">{{ p.manufacturer or "" }}</td>
+          <td class="px-3 py-2">{{ p.model or "" }}</td>
+          <td class="px-3 py-2">{{ p.ean or "" }}</td>
+          <td class="px-3 py-2">{{ p.stock if p.stock is not none else "" }}</td>
+          <td class="px-3 py-2">{{ "%.2f"|format(p.price) if p.price is not none else "" }}</td>
+          <td class="px-3 py-2">{{ "%.2f"|format(p.shipping) if p.shipping is not none else "" }}</td>
+          <td class="px-3 py-2">
+            {% set flags = [] %}
+            {% if p.missing_price %}{% set _ = flags.append("missing price") %}{% endif %}
+            {% if p.missing_identifier %}{% set _ = flags.append("missing identifier") %}{% endif %}
+            {% if p.broken_image %}{% set _ = flags.append("broken image") %}{% endif %}
+            <span class="text-xs {{ 'text-amber-700' if flags else 'text-slate-400' }}">
+              {{ flags|join(', ') if flags else 'ok' }}
+            </span>
+          </td>
+          <td class="px-3 py-2">
+            {% if p.url %}
+              <a class="text-indigo-700 hover:underline" href="{{ p.url }}" target="_blank">open</a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="mt-4 flex items-center gap-2">
+    {% if page > 1 %}
+      <a class="px-3 py-1.5 rounded-lg bg-slate-200 hover:bg-slate-300"
+         href="{{ base_path }}?page={{ page - 1 }}&size={{ size }}">Prev</a>
+    {% else %}
+      <span class="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-400">Prev</span>
+    {% endif %}
+
+    {% if page < pages %}
+      <a class="px-3 py-1.5 rounded-lg bg-slate-200 hover:bg-slate-300"
+         href="{{ base_path }}?page={{ page + 1 }}&size={{ size }}">Next</a>
+    {% else %}
+      <span class="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-400">Next</span>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
