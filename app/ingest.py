@@ -7,47 +7,60 @@ import httpx
 
 CSV_INDEX_URL = "https://hefitness.se/csv/"
 
+async def _download(client, url: str) -> bytes:
+    r = await client.get(url)
+    r.raise_for_status()
+    return r.content
+
+async def _find_csv_from_index(client, base_url: str) -> bytes:
+    # ensure trailing slash
+    if not base_url.endswith("/"):
+        base_url = base_url + "/"
+    html = (await _download(client, base_url)).decode("utf-8", "replace")
+
+    # find first csv-like href (case-insensitive), allow query strings
+    m = re.search(r'href=["\']([^"\']+\.csv(?:\?[^"\']*)?)["\']', html, re.I)
+    if not m:
+        # try upper-case .CSV or text-only autoindex
+        m = re.search(r'>([^<]+\.csv(?:\?[^<]*)?)<', html, re.I)
+    if not m:
+        raise RuntimeError(f"No .csv links found at index {base_url}")
+
+    href = m.group(1)
+    if not href.startswith("http"):
+        if href.startswith("/"):
+            # absolute path on same host
+            from urllib.parse import urlsplit
+            sp = urlsplit(base_url)
+            href = f"{sp.scheme}://{sp.netloc}{href}"
+        else:
+            href = base_url + href
+    return await _download(client, href)
+
 async def fetch_csv_bytes() -> bytes:
     """
-    Order of sources:
-      1) CSV_URL env var (direct download)
-      2) local products.csv (repo file)
-      3) try to find a CSV on https://hefitness.se/csv/
+    Priority:
+      1) CSV_URL env var:
+         - if it ends with .csv => download it
+         - else treat as index and pick the first .csv link
+      2) local products.csv
+      3) index at CSV_INDEX_URL
     """
-    # 1) environment override
     csv_url = os.getenv("CSV_URL")
-    if csv_url:
-        async with httpx.AsyncClient(timeout=30, verify=False, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0"}) as client:
-            r = await client.get(csv_url)
-            r.raise_for_status()
-            return r.content
+    async with httpx.AsyncClient(timeout=30, verify=False, follow_redirects=True,
+                                 headers={"User-Agent":"Mozilla/5.0"}) as client:
+        if csv_url:
+            if csv_url.lower().endswith(".csv"):
+                return await _download(client, csv_url)
+            # treat as index directory
+            return await _find_csv_from_index(client, csv_url)
 
-    # 2) local fallback
-    if os.path.exists("products.csv"):
-        with open("products.csv", "rb") as f:
-            return f.read()
+        if os.path.exists("products.csv"):
+            with open("products.csv", "rb") as f:
+                return f.read()
 
-    # 3) scrape index for *.csv, else try common name
-    async with httpx.AsyncClient(timeout=30, verify=False, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0"}) as client:
-        r = await client.get(CSV_INDEX_URL)
-        r.raise_for_status()
-        text = r.text
-        m = re.search(r'href="([^"]+\.csv)"', text, re.I)
-        if m:
-            url = m.group(1)
-            if not url.startswith("http"):
-                if url.startswith("/"):
-                    url = "https://hefitness.se" + url
-                else:
-                    url = CSV_INDEX_URL.rstrip("/") + "/" + url
-            r2 = await client.get(url)
-            r2.raise_for_status()
-            return r2.content
-
-        # final attempt
-        r2 = await client.get(CSV_INDEX_URL + "products.csv")
-        r2.raise_for_status()
-        return r2.content
+        # default index crawl
+        return await _find_csv_from_index(client, CSV_INDEX_URL)
 
 def parse_semicolon_csv(content: bytes) -> Iterable[dict]:
     s = content.decode("utf-8", errors="replace")
