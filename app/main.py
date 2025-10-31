@@ -137,3 +137,51 @@ def home(session: Session = Depends(get_session)):
     flagged = [p for p in allp if p.missing_price or p.missing_identifier or p.broken_image]
     template = TEMPLATES.get_template("summary.html")
     return template.render(total=len(allp), flagged=len(flagged))
+# ===== UI routes (no DB or logic changes) =====
+from fastapi import Depends
+from fastapi.responses import HTMLResponse
+from sqlmodel import Session, select
+
+try:
+    # reuse existing objects from your app
+    from app.models import Product
+    from app.db import get_session
+    from app.main import TEMPLATES as _TEMPLATES  # if already created
+    TEMPLATES = _TEMPLATES
+except Exception:
+    # fallback if TEMPLATES is defined here
+    pass
+
+@app.get("/ui/products", response_class=HTMLResponse)
+def products_page(page: int = 1, size: int = 50, session: Session = Depends(get_session)):
+    items = session.exec(select(Product)).all()
+    total = len(items)
+    start, end = (page - 1) * size, (page - 1) * size + size
+    template = TEMPLATES.get_template("products.html")
+    return template.render(
+        items=items[start:end],
+        total=total,
+        page=page,
+        size=size,
+        pages=(total + size - 1)//size or 1,
+        has_issues=False,
+        base_path="/ui/products",
+    )
+
+@app.get("/ui/issues", response_class=HTMLResponse)
+def products_with_issues_page(page: int = 1, size: int = 50, session: Session = Depends(get_session)):
+    items = session.exec(select(Product)).all()
+    items = [p for p in items if getattr(p, "missing_price", False) or getattr(p, "missing_identifier", False) or getattr(p, "broken_image", False)]
+    total = len(items)
+    start, end = (page - 1) * size, (page - 1) * size + size
+    template = TEMPLATES.get_template("products.html")
+    return template.render(
+        items=items[start:end],
+        total=total,
+        page=page,
+        size=size,
+        pages=(total + size - 1)//size or 1,
+        has_issues=True,
+        base_path="/ui/issues",
+    )
+# ==============================================
