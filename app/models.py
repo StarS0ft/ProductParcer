@@ -17,9 +17,18 @@ class Product(SQLModel, table=True):
     url: Optional[str] = None
     image_url: Optional[str] = None
     description_html: Optional[str] = None
+
+    # Existing booleans (kept)
     missing_price: bool = False
     missing_identifier: bool = False
     broken_image: bool = False
+
+    # New per-field statuses + final result
+    ean_status: Optional[str] = None          # "ok" | "missing" | "wrong"
+    price_status: Optional[str] = None        # "ok" | "missing"
+    image_status: Optional[str] = None        # "ok" | "broken"
+    validation_result: Optional[str] = None   # "OK" | "ISSUE"
+
     improved_title: Optional[str] = None
     ai_prompt: Optional[str] = None
     raw: Optional[dict] = Field(default=None, sa_column=Column(JSON))
