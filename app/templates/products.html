@@ -26,6 +26,10 @@
           <th class="px-3 py-2">Price</th>
           <th class="px-3 py-2">Shipping</th>
           <th class="px-3 py-2">Flags</th>
+          <th class="px-3 py-2">EAN status</th>
+          <th class="px-3 py-2">Price status</th>
+          <th class="px-3 py-2">Image status</th>
+          <th class="px-3 py-2">Validation Result</th>
           <th class="px-3 py-2">URL</th>
         </tr>
       </thead>
@@ -48,6 +52,26 @@
             {% if p.broken_image %}{% set _ = flags.append("broken image") %}{% endif %}
             <span class="text-xs {{ 'text-amber-700' if flags else 'text-slate-400' }}">
               {{ flags|join(', ') if flags else 'ok' }}
+            </span>
+          </td>
+          <td class="px-3 py-2">
+            <span class="text-xs {{ 'text-emerald-700' if p.ean_status == 'ok' else ('text-amber-700' if p.ean_status in ['missing','wrong'] else 'text-slate-400') }}">
+              {{ p.ean_status or "" }}
+            </span>
+          </td>
+          <td class="px-3 py-2">
+            <span class="text-xs {{ 'text-emerald-700' if p.price_status == 'ok' else ('text-amber-700' if p.price_status == 'missing' else 'text-slate-400') }}">
+              {{ p.price_status or "" }}
+            </span>
+          </td>
+          <td class="px-3 py-2">
+            <span class="text-xs {{ 'text-emerald-700' if p.image_status == 'ok' else ('text-amber-700' if p.image_status == 'broken' else 'text-slate-400') }}">
+              {{ p.image_status or "" }}
+            </span>
+          </td>
+          <td class="px-3 py-2">
+            <span class="text-xs {{ 'text-emerald-700' if p.validation_result == 'OK' else ('text-amber-700' if p.validation_result == 'ISSUE' else 'text-slate-400') }}">
+              {{ p.validation_result or "" }}
             </span>
           </td>
           <td class="px-3 py-2">
