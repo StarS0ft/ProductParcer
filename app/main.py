@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 import re
-from fastapi import FastAPI, Depends, Query
+from fastapi import FastAPI, Depends
 from fastapi.responses import HTMLResponse, JSONResponse
 from sqlmodel import select, Session
 from sqlalchemy import text
@@ -25,13 +25,9 @@ TEMPLATES = Environment(
     loader=FileSystemLoader(os.path.join(os.path.dirname(__file__), "templates"))
 )
 
-# Simple in-memory progress tracker (resets each import)
-PROGRESS = {
-    "running": False,
-    "total": 0,
-    "done": 0,
-    "summary": None,
-}
+# Progress + concurrency guard
+PROGRESS = {"running": False, "total": 0, "done": 0, "summary": None}
+INGEST_LOCK = asyncio.Lock()
 
 @app.on_event("startup")
 def _startup():
@@ -107,10 +103,10 @@ async def _ingest_impl(session: Session):
         p.broken_image = not ok_img
         p.image_status = "ok" if ok_img else "broken"
 
-        # helpers (always compute)
+        # Always compute a cleaned title
         p.improved_title = heuristic_improve_title(p.name)
 
-        # Always ask AI to assess title quality using feed fields + fetched page content.
+        # AI assessment (fields + fetched page)
         try:
             assess = await generate_title_assessment_openai(p_dict["raw"])
         except Exception:
@@ -131,20 +127,17 @@ async def _ingest_impl(session: Session):
             else:
                 if not p.name or not str(p.name).strip():
                     p.name_status = "empty"
-                    p.name_suggested = None
                 else:
                     p.name_status = "OK"
-                    p.name_suggested = None
+                p.name_suggested = None
         else:
-            # API failed -> fallback based on presence of name only
             if not p.name or not str(p.name).strip():
                 p.name_status = "empty"
-                p.name_suggested = None
             else:
                 p.name_status = "OK"
-                p.name_suggested = None
+            p.name_suggested = None
 
-        # overall validation result (after AI decision)
+        # overall validation result
         p.validation_result = (
             "OK"
             if (
@@ -163,10 +156,10 @@ async def _ingest_impl(session: Session):
     async def guarded_validate(p_dict: dict) -> Product:
         async with sem:
             res = await validate_and_build(p_dict)
-            PROGRESS["done"] += 1
+            # clamp to total in case of any unexpected overlaps
+            PROGRESS["done"] = min(PROGRESS["done"] + 1, PROGRESS["total"])
             return res
 
-    # Use as_completed to update progress as each item finishes
     tasks = [asyncio.create_task(guarded_validate(map_row(r))) for r in rows]
     products: list[Product] = []
     for fut in asyncio.as_completed(tasks):
@@ -196,22 +189,27 @@ async def _ingest_impl(session: Session):
 
 @app.post("/ingest")
 async def ingest(session: Session = Depends(get_session)):
-    try:
-        out = await _ingest_impl(session)
-        return JSONResponse(out)
-    except Exception as e:
-        PROGRESS["running"] = False
-        log.exception("Ingestion failed")
-        return JSONResponse({"error": str(e)}, status_code=500)
+    # prevent concurrent ingests (counter duplication)
+    if INGEST_LOCK.locked() or PROGRESS.get("running"):
+        return JSONResponse(
+            {"status": "already_running", "total": PROGRESS["total"], "done": PROGRESS["done"]},
+            status_code=202,
+        )
+    async with INGEST_LOCK:
+        try:
+            out = await _ingest_impl(session)
+            return JSONResponse(out)
+        except Exception as e:
+            PROGRESS["running"] = False
+            log.exception("Ingestion failed")
+            return JSONResponse({"error": str(e)}, status_code=500)
 
-# Convenience GET
 @app.get("/ingest")
 async def ingest_get(session: Session = Depends(get_session)):
     return await ingest(session)
 
 @app.get("/progress")
 def progress():
-    # lightweight progress endpoint polled by UI
     return {
         "running": PROGRESS["running"],
         "total": PROGRESS["total"],
@@ -238,14 +236,12 @@ def home(session: Session = Depends(get_session)):
     template = TEMPLATES.get_template("summary.html")
     return template.render(total=len(allp), flagged=len(flagged))
 
-# ===== UI routes (no DB or logic changes) =====
+# ===== UI routes =====
 from fastapi.responses import HTMLResponse as _HTML
 from sqlmodel import select as _select
 
 @app.get("/ui/products", response_class=_HTML)
-def products_page(
-    page: int = 1, size: int = 50, session: Session = Depends(get_session)
-):
+def products_page(page: int = 1, size: int = 50, session: Session = Depends(get_session)):
     items = session.exec(_select(Product)).all()
     total = len(items)
     start, end = (page - 1) * size, (page - 1) * size + size
@@ -261,9 +257,7 @@ def products_page(
     )
 
 @app.get("/ui/issues", response_class=_HTML)
-def products_with_issues_page(
-    page: int = 1, size: int = 50, session: Session = Depends(get_session)
-):
+def products_with_issues_page(page: int = 1, size: int = 50, session: Session = Depends(get_session)):
     items = session.exec(_select(Product)).all()
     items = [p for p in items if getattr(p, "validation_result", None) != "OK"]
     total = len(items)
