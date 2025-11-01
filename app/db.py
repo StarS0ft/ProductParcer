@@ -28,15 +28,13 @@ def init_db() -> None:
     from . import models  # noqa
     SQLModel.metadata.create_all(bind=engine)
 
-    # Add status columns idempotently; never fail startup if dialect/perm differ
+    # Add only the title-related columns (idempotent)
     try:
         with engine.begin() as conn:
-            conn.exec_driver_sql("ALTER TABLE product ADD COLUMN IF NOT EXISTS ean_status TEXT")
-            conn.exec_driver_sql("ALTER TABLE product ADD COLUMN IF NOT EXISTS price_status TEXT")
-            conn.exec_driver_sql("ALTER TABLE product ADD COLUMN IF NOT EXISTS image_status TEXT")
-            conn.exec_driver_sql("ALTER TABLE product ADD COLUMN IF NOT EXISTS validation_result TEXT")
+            conn.exec_driver_sql("ALTER TABLE product ADD COLUMN IF NOT EXISTS name_status TEXT")
+            conn.exec_driver_sql("ALTER TABLE product ADD COLUMN IF NOT EXISTS name_suggested TEXT")
     except Exception as e:
-        log.warning("Skipping column ensure: %s", e)
+        log.warning("Skipping column ensure (name_*): %s", e)
 
 def get_session() -> Generator[Session, None, None]:
     with Session(engine) as session:
