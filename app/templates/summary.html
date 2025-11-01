@@ -25,58 +25,100 @@
          class="px-4 py-2 rounded-xl bg-amber-600 text-white hover:bg-amber-700">Show Products with Issues</a>
     </div>
 
+    <!-- Import status -->
     <div id="ingest-status" class="mt-4 hidden">
       <div class="flex items-center gap-3">
         <svg class="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
           <path class="opacity-75" d="M4 12a8 8 0 018-8" stroke="currentColor" stroke-width="4"></path>
         </svg>
-        <span id="ingest-text" class="text-sm text-slate-600">Import in progress...</span>
+        <div class="flex flex-col">
+          <span id="ingest-text" class="text-sm text-slate-600">Import in progress...</span>
+          <span id="ingest-counter" class="text-xs text-slate-500 mt-0.5">Imported 0 of 0 items</span>
+        </div>
       </div>
     </div>
 
+    <!-- Result box -->
     <div id="ingest-result" class="mt-4 hidden rounded-xl border border-slate-200 bg-slate-50 p-4"></div>
   </div>
 </div>
 
 <script>
+let pollTimer = null;
+
 async function runIngest(){
   const btn = document.getElementById('btn-ingest');
   const box = document.getElementById('ingest-status');
   const resBox = document.getElementById('ingest-result');
   const sumTotal = document.getElementById('sum-total');
   const sumFlagged = document.getElementById('sum-flagged');
+  const txt = document.getElementById('ingest-text');
+  const counter = document.getElementById('ingest-counter');
 
   btn.disabled = true;
-  box.classList.remove('hidden');
   resBox.classList.add('hidden');
-  document.getElementById('ingest-text').textContent = 'Import in progress...';
+  box.classList.remove('hidden');
+  txt.textContent = 'Import in progress...';
+  counter.textContent = 'Imported 0 of 0 items';
 
-  try {
-    const r = await fetch('/ingest', { method: 'POST' });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || 'Import failed');
+  // Start polling /progress immediately (do not wait for POST to finish)
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(async () => {
+    try {
+      const r = await fetch('/progress', { cache: 'no-store' });
+      const j = await r.json();
+      // update live counter
+      const done = typeof j.done === 'number' ? j.done : 0;
+      const total = typeof j.total === 'number' ? j.total : 0;
+      counter.textContent = `Imported ${fmt(done)} of ${fmt(total)} items`;
 
-    resBox.innerHTML = `
-      <div class="text-sm">
-        <div class="font-semibold mb-1">Import finished</div>
-        <div>Ingested: <span class="font-medium">${fmt(data.ingested)}</span></div>
-        <div>Flagged with issues: <span class="font-medium">${fmt(data.flagged_issues)}</span></div>
-        ${data.example_improved_title ? `<div class="mt-2"><span class="text-slate-500">Example title:</span> ${data.example_improved_title}</div>` : ''}
-      </div>`;
-    resBox.classList.remove('hidden');
+      if (!j.running) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+        box.classList.add('hidden');
 
-    if (typeof data.ingested === 'number') sumTotal.textContent = fmt(data.ingested);
-    if (typeof data.flagged_issues === 'number') sumFlagged.textContent = fmt(data.flagged_issues);
-    document.getElementById('ingest-text').textContent = 'Done';
-  } catch (e){
-    resBox.innerHTML = `<div class="text-sm text-red-700">Error: ${e.message}</div>`;
-    resBox.classList.remove('hidden');
-    document.getElementById('ingest-text').textContent = 'Failed';
-  } finally {
-    box.classList.add('hidden');
-    btn.disabled = false;
-  }
+        // Render post-import summary (from server-provided summary)
+        if (j.summary) {
+          const s = j.summary;
+          const ing = s.ingested ?? 0;
+          const flg = s.flagged_issues ?? 0;
+          const exOld = s.example_old_title || '(none)';
+          const exNew = s.example_improved_title || '(none)';
+
+          resBox.innerHTML = `
+            <div class="text-sm">
+              <div class="font-semibold mb-1">Import finished</div>
+              <div>Number of products: <span class="font-medium">${fmt(ing)}</span></div>
+              <div>Number of products flagged with issues: <span class="font-medium">${fmt(flg)}</span></div>
+              <div class="mt-2">
+                <div class="text-slate-500 mb-0.5">Example of an "improved title":</div>
+                <div>Old Name (weak/empty): <i>${exOld}</i></div>
+                <div>Suggested title (AI): <b>${exNew}</b></div>
+              </div>
+            </div>`;
+          resBox.classList.remove('hidden');
+
+          // Update header summary counters
+          try {
+            if (typeof ing === 'number') sumTotal.textContent = fmt(ing);
+            if (typeof flg === 'number') sumFlagged.textContent = fmt(flg);
+          } catch(_) {}
+        } else {
+          // Fallback if summary missing
+          resBox.innerHTML = `<div class="text-sm">Import finished.</div>`;
+          resBox.classList.remove('hidden');
+        }
+
+        btn.disabled = false;
+      }
+    } catch(e){
+      // ignore transient errors while polling
+    }
+  }, 600);
+
+  // Fire the import (do not await; polling will pick up progress and completion)
+  fetch('/ingest', { method: 'POST' }).catch(()=>{});
 }
 </script>
 {% endblock %}
