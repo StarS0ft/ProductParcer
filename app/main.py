@@ -25,12 +25,18 @@ TEMPLATES = Environment(
     loader=FileSystemLoader(os.path.join(os.path.dirname(__file__), "templates"))
 )
 
+# Simple in-memory progress tracker (resets each import)
+PROGRESS = {
+    "running": False,
+    "total": 0,
+    "done": 0,
+    "summary": None,
+}
 
 @app.on_event("startup")
 def _startup():
     init_db()
     log.info("DB initialized.")
-
 
 def to_float(v):
     if v is None:
@@ -41,13 +47,11 @@ def to_float(v):
     except Exception:
         return None
 
-
 def to_int(v):
     try:
         return int(str(v).split(",")[0].strip())
     except Exception:
         return None
-
 
 async def _ingest_impl(session: Session):
     log.info("Starting ingestion...")
@@ -55,6 +59,12 @@ async def _ingest_impl(session: Session):
     rows_iter = parse_semicolon_csv(content)
     rows = list(rows_iter)
     log.info(f"Parsed {len(rows)} rows from CSV.")
+
+    # init progress
+    PROGRESS["running"] = True
+    PROGRESS["total"] = len(rows)
+    PROGRESS["done"] = 0
+    PROGRESS["summary"] = None
 
     def map_row(r: dict) -> dict:
         return {
@@ -99,14 +109,8 @@ async def _ingest_impl(session: Session):
 
         # helpers (always compute)
         p.improved_title = heuristic_improve_title(p.name)
-        p.ai_prompt = build_ai_prompt(p_dict["raw"], "")
 
         # Always ask AI to assess title quality using feed fields + fetched page content.
-        # Result mapping:
-        #   ok -> name_status="OK", no name_suggested
-        #   weak -> name_status="weak", keep suggested
-        #   empty -> name_status="empty", keep suggested
-        #   cant_generate/None -> fallback: empty if no name else OK
         try:
             assess = await generate_title_assessment_openai(p_dict["raw"])
         except Exception:
@@ -125,7 +129,6 @@ async def _ingest_impl(session: Session):
                 p.name_status = "empty"
                 p.name_suggested = (sug or "").strip()[:1024] if isinstance(sug, str) and sug.strip() else None
             else:
-                # cant_generate or unexpected -> fallback
                 if not p.name or not str(p.name).strip():
                     p.name_status = "empty"
                     p.name_suggested = None
@@ -155,16 +158,20 @@ async def _ingest_impl(session: Session):
 
         return p
 
-    # Tune concurrency to be polite with APIs
     sem = asyncio.Semaphore(8)
 
     async def guarded_validate(p_dict: dict) -> Product:
         async with sem:
-            return await validate_and_build(p_dict)
+            res = await validate_and_build(p_dict)
+            PROGRESS["done"] += 1
+            return res
 
-    products = await asyncio.gather(
-        *[guarded_validate(map_row(r)) for r in rows]
-    )
+    # Use as_completed to update progress as each item finishes
+    tasks = [asyncio.create_task(guarded_validate(map_row(r))) for r in rows]
+    products: list[Product] = []
+    for fut in asyncio.as_completed(tasks):
+        p = await fut
+        products.append(p)
 
     # Clear & insert (unchanged)
     session.exec(text("DELETE FROM product"))
@@ -174,15 +181,18 @@ async def _ingest_impl(session: Session):
     session.commit()
 
     issues = sum(1 for p in products if p.validation_result != "OK")
-    example = next((p for p in products if p.improved_title), None)
+    example = next((p for p in products if (p.name_status in ("weak","empty") and p.name_suggested)), None)
 
-    return {
+    out = {
         "ingested": len(products),
         "flagged_issues": issues,
-        "example_improved_title": example.improved_title if example else None,
-        "example_prompt": example.ai_prompt if example else None,
+        "example_improved_title": example.name_suggested if example else None,
+        "example_old_title": example.name if example else None,
     }
 
+    PROGRESS["summary"] = out
+    PROGRESS["running"] = False
+    return out
 
 @app.post("/ingest")
 async def ingest(session: Session = Depends(get_session)):
@@ -190,27 +200,36 @@ async def ingest(session: Session = Depends(get_session)):
         out = await _ingest_impl(session)
         return JSONResponse(out)
     except Exception as e:
+        PROGRESS["running"] = False
         log.exception("Ingestion failed")
         return JSONResponse({"error": str(e)}, status_code=500)
-
 
 # Convenience GET
 @app.get("/ingest")
 async def ingest_get(session: Session = Depends(get_session)):
     return await ingest(session)
 
+@app.get("/progress")
+def progress():
+    # lightweight progress endpoint polled by UI
+    return {
+        "running": PROGRESS["running"],
+        "total": PROGRESS["total"],
+        "done": PROGRESS["done"],
+        "summary": PROGRESS["summary"],
+    }
 
 @app.get("/summary")
 def summary(session: Session = Depends(get_session)):
     allp = session.exec(select(Product)).all()
     flagged = [p for p in allp if getattr(p, "validation_result", None) != "OK"]
-    example = next((p for p in allp if p.improved_title), None)
+    example = next((p for p in allp if (p.name_status in ("weak","empty") and p.name_suggested)), None)
     return {
         "number_of_products": len(allp),
         "number_flagged_with_issues": len(flagged),
-        "example_improved_title": example.improved_title if example else None,
+        "example_improved_title": example.name_suggested if example else None,
+        "example_old_title": example.name if example else None,
     }
-
 
 @app.get("/", response_class=HTMLResponse)
 def home(session: Session = Depends(get_session)):
@@ -219,12 +238,9 @@ def home(session: Session = Depends(get_session)):
     template = TEMPLATES.get_template("summary.html")
     return template.render(total=len(allp), flagged=len(flagged))
 
-
 # ===== UI routes (no DB or logic changes) =====
-
 from fastapi.responses import HTMLResponse as _HTML
 from sqlmodel import select as _select
-
 
 @app.get("/ui/products", response_class=_HTML)
 def products_page(
@@ -244,15 +260,12 @@ def products_page(
         base_path="/ui/products",
     )
 
-
 @app.get("/ui/issues", response_class=_HTML)
 def products_with_issues_page(
     page: int = 1, size: int = 50, session: Session = Depends(get_session)
 ):
     items = session.exec(_select(Product)).all()
-    items = [
-        p for p in items if getattr(p, "validation_result", None) != "OK"
-    ]
+    items = [p for p in items if getattr(p, "validation_result", None) != "OK"]
     total = len(items)
     start, end = (page - 1) * size, (page - 1) * size + size
     template = TEMPLATES.get_template("products.html")

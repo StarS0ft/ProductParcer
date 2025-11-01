@@ -1,82 +1,79 @@
-ï»¿{% extends "base.html" %}
-{% block content %}
-<div class="grid gap-6 md:grid-cols-3">
-  <div class="rounded-2xl bg-white shadow p-6">
-    <h2 class="text-lg font-medium mb-2">Summary</h2>
-    <div id="summary-box" class="space-y-1">
-      <p>Total products: <span id="sum-total" class="font-semibold">{{ total }}</span></p>
-      <p>Flagged with issues: <span id="sum-flagged" class="font-semibold">{{ flagged }}</span></p>
-    </div>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Summary</title>
+  <script>
+    let pollTimer = null;
+
+    async function startImport() {
+      const statusEl = document.getElementById("status");
+      const counterEl = document.getElementById("counter");
+      const resultEl = document.getElementById("result");
+      resultEl.innerHTML = "";
+      statusEl.textContent = "Import in progress...";
+      counterEl.textContent = "Imported 0 of 0 items";
+      // Kick off the import
+      fetch("/ingest", { method: "POST" }).catch(()=>{});
+      // Start polling for progress
+      if (pollTimer) clearInterval(pollTimer);
+      pollTimer = setInterval(async () => {
+        try {
+          const r = await fetch("/progress");
+          const j = await r.json();
+          counterEl.textContent = `Imported ${j.done} of ${j.total} items`;
+          if (!j.running) {
+            clearInterval(pollTimer);
+            pollTimer = null;
+            statusEl.textContent = "Import finished.";
+            // Show summary
+            if (j.summary) {
+              const s = j.summary;
+              const exampleOld = s.example_old_title || "(none)";
+              const exampleNew = s.example_improved_title || "(none)";
+              resultEl.innerHTML = `
+                <div style="margin-top:12px">
+                  <div>Number of products: <b>${s.ingested}</b></div>
+                  <div>Number of products flagged with issues: <b>${s.flagged_issues}</b></div>
+                  <div style="margin-top:8px">
+                    <div>Example of an “improved title”:</div>
+                    <div>Old Name (weak/empty): <i>${exampleOld}</i></div>
+                    <div>Suggested title (AI): <b>${exampleNew}</b></div>
+                  </div>
+                </div>`;
+            }
+          }
+        } catch(e) {
+          // ignore
+        }
+      }, 600);
+    }
+  </script>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 20px; }
+    .btn { padding: 8px 14px; border-radius: 8px; border: 1px solid #ccc; cursor: pointer; }
+    .btn:hover { background: #f5f5f5; }
+    .row { margin: 6px 0; }
+  </style>
+</head>
+<body>
+  <h2>Summary</h2>
+  <div class="row">Total in DB: <b>{{ total }}</b></div>
+  <div class="row">Flagged issues: <b>{{ flagged }}</b></div>
+
+  <div class="row" style="margin-top:14px">
+    <button class="btn" onclick="startImport()">Import Data</button>
   </div>
 
-  <div class="rounded-2xl bg-white shadow p-6 md:col-span-2">
-    <h2 class="text-lg font-medium mb-4">Actions</h2>
-    <div class="flex flex-wrap gap-3">
-      <button id="btn-ingest"
-              class="px-4 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60"
-              onclick="runIngest()">
-        Import Data
-      </button>
+  <div id="status" class="row" style="margin-top:10px;"></div>
+  <div id="counter" class="row" style="margin-top:2px; font-size: 13px; color:#666;"></div>
 
-      <a href="/ui/products"
-         class="px-4 py-2 rounded-xl bg-slate-800 text-white hover:bg-slate-900">Show Products</a>
+  <div id="result" class="row" style="margin-top:10px;"></div>
 
-      <a href="/ui/issues"
-         class="px-4 py-2 rounded-xl bg-amber-600 text-white hover:bg-amber-700">Show Products with Issues</a>
-    </div>
-
-    <div id="ingest-status" class="mt-4 hidden">
-      <div class="flex items-center gap-3">
-        <svg class="animate-spin h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path class="opacity-75" d="M4 12a8 8 0 018-8" stroke="currentColor" stroke-width="4"></path>
-        </svg>
-        <span id="ingest-text" class="text-sm text-slate-600">Import in progress...</span>
-      </div>
-    </div>
-
-    <div id="ingest-result" class="mt-4 hidden rounded-xl border border-slate-200 bg-slate-50 p-4"></div>
+  <div class="row" style="margin-top:16px">
+    <a href="/ui/products">Show Products</a> |
+    <a href="/ui/issues">Show Products with issues</a>
   </div>
-</div>
-
-<script>
-async function runIngest(){
-  const btn = document.getElementById('btn-ingest');
-  const box = document.getElementById('ingest-status');
-  const resBox = document.getElementById('ingest-result');
-  const sumTotal = document.getElementById('sum-total');
-  const sumFlagged = document.getElementById('sum-flagged');
-
-  btn.disabled = true;
-  box.classList.remove('hidden');
-  resBox.classList.add('hidden');
-  document.getElementById('ingest-text').textContent = 'Import in progress...';
-
-  try {
-    const r = await fetch('/ingest', { method: 'POST' });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || 'Import failed');
-
-    resBox.innerHTML = `
-      <div class="text-sm">
-        <div class="font-semibold mb-1">Import finished</div>
-        <div>Ingested: <span class="font-medium">${fmt(data.ingested)}</span></div>
-        <div>Flagged with issues: <span class="font-medium">${fmt(data.flagged_issues)}</span></div>
-        ${data.example_improved_title ? `<div class="mt-2"><span class="text-slate-500">Example title:</span> ${data.example_improved_title}</div>` : ''}
-      </div>`;
-    resBox.classList.remove('hidden');
-
-    if (typeof data.ingested === 'number') sumTotal.textContent = fmt(data.ingested);
-    if (typeof data.flagged_issues === 'number') sumFlagged.textContent = fmt(data.flagged_issues);
-    document.getElementById('ingest-text').textContent = 'Done';
-  } catch (e){
-    resBox.innerHTML = `<div class="text-sm text-red-700">Error: ${e.message}</div>`;
-    resBox.classList.remove('hidden');
-    document.getElementById('ingest-text').textContent = 'Failed';
-  } finally {
-    box.classList.add('hidden');
-    btn.disabled = false;
-  }
-}
-</script>
-{% endblock %}
+</body>
+</html>
