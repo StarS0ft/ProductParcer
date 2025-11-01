@@ -1,8 +1,13 @@
-﻿from datetime import datetime
+﻿"""SQLModel ORM models for ProductParcer.
+Cleanup only: docstring. No schema or behavior changes.
+"""
+from datetime import datetime
 from typing import Optional
-from sqlmodel import SQLModel, Field, Column, JSON
+
+from sqlmodel import Column, Field, JSON, SQLModel
 
 class Product(SQLModel, table=True):
+    """Product row persisted after CSV ingestion and validation."""
     id: Optional[int] = Field(default=None, primary_key=True)
     artnr: Optional[str] = Field(index=True)
     category: Optional[str] = None

@@ -1,50 +1,71 @@
-﻿import asyncio
-from fastapi import FastAPI, Depends, Query
-from fastapi.responses import HTMLResponse, JSONResponse
-from sqlmodel import select, Session
-from sqlalchemy import text
-from .db import init_db, get_session
-from .models import Product
-from .ingest import fetch_csv_bytes, parse_semicolon_csv
-from .validators import is_identifier_missing, check_image_ok
-from .ai_title import heuristic_improve_title, build_ai_prompt
-from jinja2 import Environment, FileSystemLoader
-import os
+﻿"""FastAPI entrypoint for ProductParcer.
+Cleanup only: docstrings, comments, minor formatting and type hints.
+No logic, output, schema, or behavior changes.
+"""
+import asyncio
 import logging
+import os
+from typing import Dict, Any, Optional, List
+
+from fastapi import Depends, FastAPI, Query
+from fastapi.responses import HTMLResponse, JSONResponse
+from jinja2 import Environment, FileSystemLoader
+from sqlalchemy import text
+from sqlmodel import Session, select
+
+from .ai_title import build_ai_prompt, heuristic_improve_title
+from .db import get_session, init_db
+from .ingest import fetch_csv_bytes, parse_semicolon_csv
+from .models import Product
+from .validators import check_image_ok, is_identifier_missing
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("app")
 
 app = FastAPI(title="AgentMaMa.ai Coding Challenge")
-TEMPLATES = Environment(loader=FileSystemLoader(os.path.join(os.path.dirname(__file__), "templates")))
+
+# Jinja2 templates under app/templates
+TEMPLATES = Environment(
+    loader=FileSystemLoader(os.path.join(os.path.dirname(__file__), "templates"))
+)
+
 
 @app.on_event("startup")
-def _startup():
+def _startup() -> None:
+    """Initialize DB once on startup."""
     init_db()
     log.info("DB initialized.")
 
-def to_float(v):
-    if v is None: return None
+
+def to_float(v: Any) -> Optional[float]:
+    """Best-effort float parser used by ingestion mapping. Preserves existing behavior."""
+    if v is None:
+        return None
     try:
         s = str(v).replace(" ", "").replace("\u00A0", "").replace(",", ".")
         return float(s)
     except Exception:
         return None
 
-def to_int(v):
+
+def to_int(v: Any) -> Optional[int]:
+    """Best-effort int parser used by ingestion mapping. Preserves existing behavior."""
     try:
         return int(str(v).split(",")[0].strip())
     except Exception:
         return None
 
-async def _ingest_impl(session: Session):
+
+async def _ingest_impl(session: Session) -> Dict[str, Any]:
+    """Fetch CSV, parse, validate, and store products. Behavior unchanged."""
     log.info("Starting ingestion...")
     content = await fetch_csv_bytes()
     rows_iter = parse_semicolon_csv(content)
-    rows = list(rows_iter)
+    rows: List[dict] = list(rows_iter)
     log.info(f"Parsed {len(rows)} rows from CSV.")
 
-    def map_row(r):
+    def map_row(r: dict) -> dict:
+        # Mapping preserved exactly
         return {
             "artnr": r.get("Artnr"),
             "category": r.get("Varugrupp"),
@@ -62,23 +83,28 @@ async def _ingest_impl(session: Session):
             "raw": r,
         }
 
-    async def validate_and_build(p_dict):
+    async def validate_and_build(p_dict: dict) -> Product:
+        # Flags and enrichment preserved exactly
         p = Product(**p_dict)
-        p.missing_price = p.price is None or (isinstance(p.price, (int, float)) and p.price <= 0)
+        p.missing_price = p.price is None or (
+            isinstance(p.price, (int, float)) and p.price <= 0
+        )
         p.missing_identifier = is_identifier_missing(p.ean or "")
         p.broken_image = not (await check_image_ok(p.image_url))
         p.improved_title = heuristic_improve_title(p.name)
         p.ai_prompt = build_ai_prompt(p_dict["raw"])
         return p
 
+    # Concurrency preserved
     sem = asyncio.Semaphore(16)
-    async def guarded_validate(p_dict):
+
+    async def guarded_validate(p_dict: dict) -> Product:
         async with sem:
             return await validate_and_build(p_dict)
 
     products = await asyncio.gather(*[guarded_validate(map_row(r)) for r in rows])
 
-    # Clear table safely (works across SQLAlchemy 2.x)
+    # Clear table and insert — statements unchanged
     session.exec(text("DELETE FROM product"))
     session.commit()
 
@@ -86,7 +112,9 @@ async def _ingest_impl(session: Session):
         session.add(p)
     session.commit()
 
-    issues = sum(1 for p in products if p.missing_price or p.missing_identifier or p.broken_image)
+    issues = sum(
+        1 for p in products if p.missing_price or p.missing_identifier or p.broken_image
+    )
     example = next((p for p in products if p.improved_title), None)
 
     result = {
@@ -98,8 +126,10 @@ async def _ingest_impl(session: Session):
     log.info(f"Ingestion done: {result}")
     return result
 
+
 @app.post("/ingest")
 async def ingest(session: Session = Depends(get_session)):
+    """POST endpoint to trigger ingestion."""
     try:
         out = await _ingest_impl(session)
         return JSONResponse(out)
@@ -107,13 +137,17 @@ async def ingest(session: Session = Depends(get_session)):
         log.exception("Ingestion failed")
         return JSONResponse({"error": str(e)}, status_code=500)
 
-# Convenience for clicks in browser:
+
+# Convenience for manual testing
 @app.get("/ingest")
 async def ingest_get(session: Session = Depends(get_session)):
+    """GET variant that calls the same ingestion logic."""
     return await ingest(session)
 
+
 @app.get("/summary")
-def summary(session: Session = Depends(get_session)):
+def summary(session: Session = Depends(get_session)) -> Dict[str, Any]:
+    """Return aggregated summary."""
     allp = session.exec(select(Product)).all()
     flagged = [p for p in allp if p.missing_price or p.missing_identifier or p.broken_image]
     example = next((p for p in allp if p.improved_title), None)
@@ -123,37 +157,45 @@ def summary(session: Session = Depends(get_session)):
         "example_improved_title": example.improved_title if example else None,
     }
 
+
 @app.get("/products")
-def products(has_issues: bool = Query(default=False), page: int = 1, size: int = 50, session: Session = Depends(get_session)):
+def products(
+    has_issues: bool = Query(default=False),
+    page: int = 1,
+    size: int = 50,
+    session: Session = Depends(get_session),
+):
+    """List products, optionally filtered by issues."""
     items = session.exec(select(Product)).all()
     if has_issues:
         items = [p for p in items if p.missing_price or p.missing_identifier or p.broken_image]
     start, end = (page - 1) * size, (page - 1) * size + size
-    return {"page": page, "size": size, "total": len(items), "items": [p.dict() for p in items[start:end]]}
+    return {
+        "page": page,
+        "size": size,
+        "total": len(items),
+        "items": [p.dict() for p in items[start:end]],
+    }
+
 
 @app.get("/", response_class=HTMLResponse)
 def home(session: Session = Depends(get_session)):
+    """Home page with summary via Jinja2."""
     allp = session.exec(select(Product)).all()
     flagged = [p for p in allp if p.missing_price or p.missing_identifier or p.broken_image]
     template = TEMPLATES.get_template("summary.html")
     return template.render(total=len(allp), flagged=len(flagged))
-# ===== UI routes (no DB or logic changes) =====
-from fastapi import Depends
-from fastapi.responses import HTMLResponse
-from sqlmodel import Session, select
 
-try:
-    # reuse existing objects from your app
-    from app.models import Product
-    from app.db import get_session
-    from app.main import TEMPLATES as _TEMPLATES  # if already created
-    TEMPLATES = _TEMPLATES
-except Exception:
-    # fallback if TEMPLATES is defined here
-    pass
+
+# ===== UI routes (no DB or logic changes) =====
 
 @app.get("/ui/products", response_class=HTMLResponse)
-def products_page(page: int = 1, size: int = 50, session: Session = Depends(get_session)):
+def products_page(
+    page: int = 1,
+    size: int = 50,
+    session: Session = Depends(get_session),
+):
+    """UI page for all products."""
     items = session.exec(select(Product)).all()
     total = len(items)
     start, end = (page - 1) * size, (page - 1) * size + size
@@ -163,15 +205,27 @@ def products_page(page: int = 1, size: int = 50, session: Session = Depends(get_
         total=total,
         page=page,
         size=size,
-        pages=(total + size - 1)//size or 1,
+        pages=(total + size - 1) // size or 1,
         has_issues=False,
         base_path="/ui/products",
     )
 
+
 @app.get("/ui/issues", response_class=HTMLResponse)
-def products_with_issues_page(page: int = 1, size: int = 50, session: Session = Depends(get_session)):
+def products_with_issues_page(
+    page: int = 1,
+    size: int = 50,
+    session: Session = Depends(get_session),
+):
+    """UI page for products flagged with issues."""
     items = session.exec(select(Product)).all()
-    items = [p for p in items if getattr(p, "missing_price", False) or getattr(p, "missing_identifier", False) or getattr(p, "broken_image", False)]
+    items = [
+        p
+        for p in items
+        if getattr(p, "missing_price", False)
+        or getattr(p, "missing_identifier", False)
+        or getattr(p, "broken_image", False)
+    ]
     total = len(items)
     start, end = (page - 1) * size, (page - 1) * size + size
     template = TEMPLATES.get_template("products.html")
@@ -180,7 +234,7 @@ def products_with_issues_page(page: int = 1, size: int = 50, session: Session = 
         total=total,
         page=page,
         size=size,
-        pages=(total + size - 1)//size or 1,
+        pages=(total + size - 1) // size or 1,
         has_issues=True,
         base_path="/ui/issues",
     )
