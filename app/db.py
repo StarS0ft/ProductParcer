@@ -38,7 +38,7 @@ def auto_add_columns():
 
 
 def init_db():
-    from . import models  # register tables
+    from . import models  # register tables  # noqa: F401
 
     SQLModel.metadata.create_all(bind=engine)
     try:
