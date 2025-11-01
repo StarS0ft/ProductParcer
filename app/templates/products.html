@@ -1,4 +1,4 @@
-﻿{% extends "base.html" %}
+{% extends "base.html" %}
 {% block content %}
 <div class="mb-4">
   <a href="/" class="px-3 py-1.5 rounded-lg bg-slate-200 hover:bg-slate-300 text-sm">Back to Main Menu</a>
@@ -24,12 +24,12 @@
           <th class="px-2 py-2 w-64">Name</th>
           <th class="px-2 py-2">Manufacturer</th>
           <th class="px-2 py-2">Model</th>
-          <th class="px-2 py-2">EAN</th>
+          <th class="px-2 py-2 w-20 text-center">EAN</th>
           <th class="px-2 py-2">Stock</th>
           <th class="px-2 py-2">Price</th>
           <th class="px-2 py-2">Shipping</th>
 
-          <th class="px-2 py-2">EAN</th>
+          <th class="px-2 py-2 w-20 text-center">EAN</th>
           <th class="px-2 py-2">Price</th>
           <th class="px-2 py-2">Image</th>
           <th class="px-2 py-2">Result</th>
@@ -39,32 +39,32 @@
       <tbody>
         {% for p in items %}
         <tr class="border-b last:border-0">
-          <td class="px-2 py-1">{{ p.artnr or "" }}</td>
-          <td class="px-2 py-1">{{ p.category or "" }}</td>
+          <td class="px-2 py-1 text-center">{{ p.artnr or "" }}</td>
+          <td class="px-2 py-1 text-center">{{ p.category or "" }}</td>
           <!-- allow wrapping for long titles -->
           <td class="px-2 py-1 whitespace-normal max-w-xs">{{ p.name or "" }}</td>
-          <td class="px-2 py-1">{{ p.manufacturer or "" }}</td>
-          <td class="px-2 py-1">{{ p.model or "" }}</td>
-          <td class="px-2 py-1">{{ p.ean or "" }}</td>
-          <td class="px-2 py-1">{{ p.stock if p.stock is not none else "" }}</td>
-          <td class="px-2 py-1">{{ "%.2f"|format(p.price) if p.price is not none else "" }}</td>
-          <td class="px-2 py-1">{{ "%.2f"|format(p.shipping) if p.shipping is not none else "" }}</td>
+          <td class="px-2 py-1 text-center">{{ p.manufacturer or "" }}</td>
+          <td class="px-2 py-1 text-center">{{ p.model or "" }}</td>
+          <td class="px-2 py-1 text-center">{{ p.ean or "" }}</td>
+          <td class="px-2 py-1 text-center">{{ p.stock if p.stock is not none else "" }}</td>
+          <td class="px-2 py-1 text-center">{{ "%.2f"|format(p.price) if p.price is not none else "" }}</td>
+          <td class="px-2 py-1 text-center">{{ "%.2f"|format(p.shipping) if p.shipping is not none else "" }}</td>
 
           <!-- statuses compact -->
-          <td class="px-2 py-1">
+          <td class="px-2 py-1 text-center">
             <span class="{{ 'text-emerald-700' if p.ean_status == 'ok' else 'text-amber-700' }}">{{ p.ean_status }}</span>
           </td>
-          <td class="px-2 py-1">
+          <td class="px-2 py-1 text-center">
             <span class="{{ 'text-emerald-700' if p.price_status == 'ok' else 'text-amber-700' }}">{{ p.price_status }}</span>
           </td>
-          <td class="px-2 py-1">
+          <td class="px-2 py-1 text-center">
             <span class="{{ 'text-emerald-700' if p.image_status == 'ok' else 'text-amber-700' }}">{{ p.image_status }}</span>
           </td>
           <td class="px-2 py-1 font-semibold {{ 'text-emerald-700' if p.validation_result == 'OK' else 'text-amber-700' }}">
             {{ p.validation_result }}
           </td>
 
-          <td class="px-2 py-1">
+          <td class="px-2 py-1 text-center">
             {% if p.url %}
               <a class="text-indigo-700 hover:underline" href="{{ p.url }}" target="_blank">open</a>
             {% endif %}
