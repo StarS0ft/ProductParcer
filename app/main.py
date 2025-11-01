@@ -1,5 +1,4 @@
 ﻿import asyncio
-from sqlmodel import select
 import logging
 import os
 
@@ -8,6 +7,7 @@ from fastapi.responses import HTMLResponse, JSONResponse  # noqa: E402
 from jinja2 import Environment, FileSystemLoader
 from sqlalchemy import text
 from sqlmodel import Session  # noqa: E402
+from sqlmodel import select
 
 from .ai_title import build_ai_prompt, heuristic_improve_title
 from .db import get_session, init_db
