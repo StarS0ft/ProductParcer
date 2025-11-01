@@ -2,3 +2,8 @@
 __pycache__/
 *.pyc
 data.db
+
+# Local workspace only
+_backup/
+
+_proposed/

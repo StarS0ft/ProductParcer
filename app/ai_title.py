@@ -1,6 +1,11 @@
-﻿import re
+﻿"""Title improvement prompt and heuristic.
+Cleanup only: docstrings and type hints. No behavior changes.
+"""
+import re
+from typing import Optional, Dict
 
-def build_ai_prompt(row: dict) -> str:
+def build_ai_prompt(row: Dict) -> str:
+    """Create an LLM prompt for improving titles. Behavior unchanged."""
     return (
         "You are an e-commerce SEO assistant. Improve this product title to be clear, "
         "concise, language-preserving, and include key attributes. Keep Swedish if input is Swedish. "
@@ -12,7 +17,8 @@ def build_ai_prompt(row: dict) -> str:
         f"Extra: EAN={row.get('EAN')}, Price={row.get('Pris')}\n"
     )
 
-def heuristic_improve_title(title: str | None) -> str | None:
+def heuristic_improve_title(title: Optional[str]) -> Optional[str]:
+    """Non-LLM heuristic cleanup for titles. Behavior unchanged."""
     if not title:
         return None
     t = re.sub(r"\s+", " ", title).strip()
