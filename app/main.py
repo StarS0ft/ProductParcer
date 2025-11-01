@@ -1,4 +1,7 @@
 ﻿import asyncio
+import logging
+import os
+import re
 from fastapi import FastAPI, Depends, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 from sqlmodel import select, Session
@@ -9,8 +12,6 @@ from .ingest import fetch_csv_bytes, parse_semicolon_csv
 from .validators import is_identifier_missing, check_image_ok
 from .ai_title import heuristic_improve_title, build_ai_prompt
 from jinja2 import Environment, FileSystemLoader
-import os
-import logging
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("app")
@@ -36,6 +37,20 @@ def to_int(v):
         return int(str(v).split(",")[0].strip())
     except Exception:
         return None
+
+def is_weak_title(name: str) -> bool:
+    t = (name or "").strip()
+    if not t:
+        return False
+    if len(t) < 6:
+        return True
+    generic = {"produkt", "product", "unknown", "n/a", "na"}
+    if t.lower() in generic:
+        return True
+    # very short alnum code-like strings
+    if re.fullmatch(r"[A-Za-z0-9\-_/]{1,8}", t):
+        return True
+    return False
 
 async def _ingest_impl(session: Session):
     log.info("Starting ingestion...")
@@ -65,12 +80,11 @@ async def _ingest_impl(session: Session):
     async def validate_and_build(p_dict):
         p = Product(**p_dict)
 
-        # Price status (keep old boolean)
+        # existing validations (unchanged)
         missing_price = p.price is None or (isinstance(p.price, (int, float)) and p.price <= 0)
         p.missing_price = missing_price
         p.price_status = "missing" if missing_price else "ok"
 
-        # EAN status (keep old boolean)
         missing_id = is_identifier_missing(p.ean or "")
         p.missing_identifier = missing_id
         if not p.ean or p.ean.strip() in {"-", "0", "None", ""}:
@@ -78,15 +92,25 @@ async def _ingest_impl(session: Session):
         else:
             p.ean_status = "wrong" if missing_id else "ok"
 
-        # Image status (keep old boolean)
         ok_img = await check_image_ok(p.image_url)
         p.broken_image = not ok_img
         p.image_status = "ok" if ok_img else "broken"
 
-        # Final summary
-        p.validation_result = "OK" if (p.price_status == "ok" and p.ean_status == "ok" and p.image_status == "ok") else "ISSUE"
+        # NEW: title validation (no LLM yet)
+        if not p.name or not p.name.strip():
+            p.name_status = "missed"
+        else:
+            p.name_status = "weak" if is_weak_title(p.name) else "OK"
 
-        # Title/prompt unchanged
+        # final result adds title status
+        p.validation_result = "OK" if (
+            p.price_status == "ok"
+            and p.ean_status == "ok"
+            and p.image_status == "ok"
+            and p.name_status == "OK"
+        ) else "ISSUE"
+
+        # unchanged helpers
         p.improved_title = heuristic_improve_title(p.name)
         p.ai_prompt = build_ai_prompt(p_dict["raw"])
         return p
@@ -98,10 +122,9 @@ async def _ingest_impl(session: Session):
 
     products = await asyncio.gather(*[guarded_validate(map_row(r)) for r in rows])
 
-    # Clear table safely
+    # Clear & insert (unchanged)
     session.exec(text("DELETE FROM product"))
     session.commit()
-
     for p in products:
         session.add(p)
     session.commit()
@@ -109,14 +132,12 @@ async def _ingest_impl(session: Session):
     issues = sum(1 for p in products if p.validation_result != "OK")
     example = next((p for p in products if p.improved_title), None)
 
-    result = {
+    return {
         "ingested": len(products),
         "flagged_issues": issues,
         "example_improved_title": example.improved_title if example else None,
         "example_prompt": example.ai_prompt if example else None,
     }
-    log.info(f"Ingestion done: {result}")
-    return result
 
 @app.post("/ingest")
 async def ingest(session: Session = Depends(get_session)):
@@ -142,37 +163,9 @@ def summary(session: Session = Depends(get_session)):
         "example_improved_title": example.improved_title if example else None,
     }
 
-@app.get("/products")
-def products(has_issues: bool = Query(default=False), page: int = 1, size: int = 50, session: Session = Depends(get_session)):
-    items = session.exec(select(Product)).all()
-    if has_issues:
-        items = [p for p in items if getattr(p, "validation_result", None) != "OK"]
-    start, end = (page - 1) * size, (page - 1) * size + size
-    return {"page": page, "size": size, "total": len(items), "items": [p.dict() for p in items[start:end]]}
-
 @app.get("/", response_class=HTMLResponse)
 def home(session: Session = Depends(get_session)):
     allp = session.exec(select(Product)).all()
     flagged = [p for p in allp if getattr(p, "validation_result", None) != "OK"]
     template = TEMPLATES.get_template("summary.html")
     return template.render(total=len(allp), flagged=len(flagged))
-
-# UI routes unchanged (lists use same data)
-from fastapi.responses import HTMLResponse as _HTML
-from sqlmodel import select as _select
-@app.get("/ui/products", response_class=_HTML)
-def products_page(page: int = 1, size: int = 50, session: Session = Depends(get_session)):
-    items = session.exec(_select(Product)).all()
-    total = len(items)
-    start, end = (page - 1) * size, (page - 1) * size + size
-    template = TEMPLATES.get_template("products.html")
-    return template.render(items=items[start:end], total=total, page=page, size=size, pages=(total + size - 1)//size or 1, has_issues=False, base_path="/ui/products")
-
-@app.get("/ui/issues", response_class=_HTML)
-def products_with_issues_page(page: int = 1, size: int = 50, session: Session = Depends(get_session)):
-    items = session.exec(_select(Product)).all()
-    items = [p for p in items if getattr(p, "validation_result", None) != "OK"]
-    total = len(items)
-    start, end = (page - 1) * size, (page - 1) * size + size
-    template = TEMPLATES.get_template("products.html")
-    return template.render(items=items[start:end], total=total, page=page, size=size, pages=(total + size - 1)//size or 1, has_issues=True, base_path="/ui/issues")
