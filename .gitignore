@@ -2,3 +2,13 @@
 __pycache__/
 *.pyc
 data.db
+# Cleanup additions
+__pycache__/
+*.pyc
+.venv/
+.env
+.env.*
+*.db
+products.csv
+.DS_Store
+.vscode/
