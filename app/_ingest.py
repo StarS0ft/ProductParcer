@@ -1,10 +1,12 @@
-﻿from typing import Iterable
-import csv
+﻿import csv
 import io
 import re
+from typing import Iterable
+
 import httpx
 
 CSV_INDEX_URL = "https://hefitness.se/csv/"
+
 
 async def fetch_csv_bytes() -> bytes:
     async with httpx.AsyncClient(timeout=20) as client:
@@ -25,6 +27,7 @@ async def fetch_csv_bytes() -> bytes:
         r2 = await client.get(CSV_INDEX_URL + "products.csv")
         r2.raise_for_status()
         return r2.content
+
 
 def parse_semicolon_csv(content: bytes) -> Iterable[dict]:
     s = content.decode("utf-8", errors="replace")

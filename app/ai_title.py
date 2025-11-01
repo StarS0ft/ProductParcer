@@ -1,5 +1,6 @@
 ﻿import re
 
+
 def build_ai_prompt(row: dict) -> str:
     return (
         "You are an e-commerce SEO assistant. Improve this product title to be clear, "
@@ -11,6 +12,7 @@ def build_ai_prompt(row: dict) -> str:
         f"Category: {row.get('Varugrupp') or row.get('category')}\n"
         f"Extra: EAN={row.get('EAN')}, Price={row.get('Pris')}\n"
     )
+
 
 def heuristic_improve_title(title: str | None) -> str | None:
     if not title:

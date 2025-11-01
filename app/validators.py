@@ -1,7 +1,9 @@
 ﻿import re
+
 import httpx
 
 IDENTIFIER_MISSING_PAT = re.compile(r"identifier_exists\s*=\s*no", re.I)
+
 
 async def check_image_ok(url: str) -> bool:
     if not url or not url.startswith("http"):
@@ -14,6 +16,7 @@ async def check_image_ok(url: str) -> bool:
             return r.status_code < 400
     except Exception:
         return False
+
 
 def is_identifier_missing(ean_field: str | None) -> bool:
     if not ean_field or ean_field.strip() in {"-", "0", "None", ""}:
