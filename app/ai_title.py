@@ -1,16 +1,17 @@
-import os, re, json, logging, httpx
+import os
+import re
+import json
+import logging
+import httpx
 from html import unescape
 
 _log = logging.getLogger("title.llm")
 
 def _strip_html(text: str) -> str:
     text = unescape(text or "")
-    # Remove <script>/<style>
-    text = re.sub(r"<script[^>]*>.*?</script>", " ", text, flags=re.I|re.S)
-    text = re.sub(r"<style[^>]*>.*?</style>", " ", text, flags=re.I|re.S)
-    # Remove all tags
+    text = re.sub(r"<script[^>]*>.*?</script>", " ", text, flags=re.I | re.S)
+    text = re.sub(r"<style[^>]*>.*?</style>", " ", text, flags=re.I | re.S)
     text = re.sub(r"<[^>]+>", " ", text)
-    # Collapse whitespace
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
@@ -21,23 +22,18 @@ async def _fetch_url_text(url: str | None, timeout_sec: int = 8, max_chars: int 
         async with httpx.AsyncClient(timeout=timeout_sec, follow_redirects=True) as client:
             r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
             r.raise_for_status()
-            txt = _strip_html(r.text)
-            return txt[:max_chars]
+            return _strip_html(r.text)[:max_chars]
     except Exception:
         return ""
 
-def build_assess_prompt(row: dict, page_excerpt: str) -> str:
+def _build_assess_prompt(row: dict, page_excerpt: str) -> str:
     return (
         "Task: Evaluate the current product title and, if needed, propose a better one.\n"
-        "Return STRICT JSON with fields exactly as: "
-        '{"name_quality":"ok|weak|empty|cant_generate","suggested_title":null|string}.\n'
+        "Return STRICT JSON: {\"name_quality\":\"ok|weak|empty|cant_generate\",\"suggested_title\":null|string}.\n"
         "Rules:\n"
-        "- Use the same language as the input (Swedish stays Swedish).\n"
-        "- If current title is missing/blank, set name_quality=empty and generate suggested_title.\n"
-        "- If title is present but unclear/low quality, set name_quality=weak and generate suggested_title.\n"
-        "- If title is already clear and good, set name_quality=ok and suggested_title=null.\n"
-        "- Keep the suggestion concise, <= 90 characters, no clickbait.\n"
-        "Available product fields and page excerpt follow.\n\n"
+        "- Keep original language (Swedish stays Swedish).\n"
+        "- empty => generate suggestion; weak => generate suggestion; ok => no suggestion.\n"
+        "- Concise, <= 90 characters, no clickbait.\n\n"
         f"URL: {row.get('URL') or row.get('url')}\n"
         f"Artnr: {row.get('Artnr') or row.get('artnr')}\n"
         f"Category: {row.get('Varugrupp') or row.get('category')}\n"
@@ -61,10 +57,10 @@ def heuristic_improve_title(title: str | None) -> str | None:
 
 async def generate_title_assessment_openai(row: dict, timeout_sec: int = 12):
     """
-    Always assess the title. Fetches product page content and asks OpenAI to decide:
-      name_quality: ok | weak | empty | cant_generate
-      suggested_title: str|null (only when weak/empty)
-    Returns dict or None on any failure. Never raises.
+    Always assess the title (uses fields + fetched product page content).
+    Returns dict:
+      { "name_quality": "ok|weak|empty|cant_generate", "suggested_title": str|null }
+    Returns None on failure. Never raises.
     """
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -73,19 +69,16 @@ async def generate_title_assessment_openai(row: dict, timeout_sec: int = 12):
 
     url = row.get("URL") or row.get("url")
     excerpt = await _fetch_url_text(url)
-    prompt = build_assess_prompt(row, excerpt)
-
     payload = {
         "model": "gpt-4o-mini",
         "response_format": {"type": "json_object"},
         "messages": [
             {"role": "system", "content": "You are a precise product title editor. Respond ONLY with valid JSON."},
-            {"role": "user", "content": prompt}
+            {"role": "user", "content": _build_assess_prompt(row, excerpt)},
         ],
         "temperature": 0.2,
-        "max_tokens": 220
+        "max_tokens": 220,
     }
-
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
     try:
@@ -103,8 +96,3 @@ async def generate_title_assessment_openai(row: dict, timeout_sec: int = 12):
         _log.info("openai_fail")
         return None
     return None
-
-# Backwards-compat exports used by main.py
-build_ai_prompt = build_assess_prompt
-generate_title_suggestion_openai = generate_title_assessment_openai
-build_llm_title_prompt = build_assess_prompt
