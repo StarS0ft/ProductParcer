@@ -1,4 +1,5 @@
 ﻿import asyncio
+from sqlmodel import select
 import logging
 import os
 
