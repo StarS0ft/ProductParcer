@@ -64,9 +64,29 @@ async def _ingest_impl(session: Session):
 
     async def validate_and_build(p_dict):
         p = Product(**p_dict)
-        p.missing_price = p.price is None or (isinstance(p.price, (int, float)) and p.price <= 0)
-        p.missing_identifier = is_identifier_missing(p.ean or "")
-        p.broken_image = not (await check_image_ok(p.image_url))
+
+        # Price status (keep old boolean)
+        missing_price = p.price is None or (isinstance(p.price, (int, float)) and p.price <= 0)
+        p.missing_price = missing_price
+        p.price_status = "missing" if missing_price else "ok"
+
+        # EAN status (keep old boolean)
+        missing_id = is_identifier_missing(p.ean or "")
+        p.missing_identifier = missing_id
+        if not p.ean or p.ean.strip() in {"-", "0", "None", ""}:
+            p.ean_status = "missing"
+        else:
+            p.ean_status = "wrong" if missing_id else "ok"
+
+        # Image status (keep old boolean)
+        ok_img = await check_image_ok(p.image_url)
+        p.broken_image = not ok_img
+        p.image_status = "ok" if ok_img else "broken"
+
+        # Final summary
+        p.validation_result = "OK" if (p.price_status == "ok" and p.ean_status == "ok" and p.image_status == "ok") else "ISSUE"
+
+        # Title/prompt unchanged
         p.improved_title = heuristic_improve_title(p.name)
         p.ai_prompt = build_ai_prompt(p_dict["raw"])
         return p
@@ -78,7 +98,7 @@ async def _ingest_impl(session: Session):
 
     products = await asyncio.gather(*[guarded_validate(map_row(r)) for r in rows])
 
-    # Clear table safely (works across SQLAlchemy 2.x)
+    # Clear table safely
     session.exec(text("DELETE FROM product"))
     session.commit()
 
@@ -86,7 +106,7 @@ async def _ingest_impl(session: Session):
         session.add(p)
     session.commit()
 
-    issues = sum(1 for p in products if p.missing_price or p.missing_identifier or p.broken_image)
+    issues = sum(1 for p in products if p.validation_result != "OK")
     example = next((p for p in products if p.improved_title), None)
 
     result = {
@@ -107,7 +127,6 @@ async def ingest(session: Session = Depends(get_session)):
         log.exception("Ingestion failed")
         return JSONResponse({"error": str(e)}, status_code=500)
 
-# Convenience for clicks in browser:
 @app.get("/ingest")
 async def ingest_get(session: Session = Depends(get_session)):
     return await ingest(session)
@@ -115,7 +134,7 @@ async def ingest_get(session: Session = Depends(get_session)):
 @app.get("/summary")
 def summary(session: Session = Depends(get_session)):
     allp = session.exec(select(Product)).all()
-    flagged = [p for p in allp if p.missing_price or p.missing_identifier or p.broken_image]
+    flagged = [p for p in allp if getattr(p, "validation_result", None) != "OK"]
     example = next((p for p in allp if p.improved_title), None)
     return {
         "number_of_products": len(allp),
@@ -127,61 +146,33 @@ def summary(session: Session = Depends(get_session)):
 def products(has_issues: bool = Query(default=False), page: int = 1, size: int = 50, session: Session = Depends(get_session)):
     items = session.exec(select(Product)).all()
     if has_issues:
-        items = [p for p in items if p.missing_price or p.missing_identifier or p.broken_image]
+        items = [p for p in items if getattr(p, "validation_result", None) != "OK"]
     start, end = (page - 1) * size, (page - 1) * size + size
     return {"page": page, "size": size, "total": len(items), "items": [p.dict() for p in items[start:end]]}
 
 @app.get("/", response_class=HTMLResponse)
 def home(session: Session = Depends(get_session)):
     allp = session.exec(select(Product)).all()
-    flagged = [p for p in allp if p.missing_price or p.missing_identifier or p.broken_image]
+    flagged = [p for p in allp if getattr(p, "validation_result", None) != "OK"]
     template = TEMPLATES.get_template("summary.html")
     return template.render(total=len(allp), flagged=len(flagged))
-# ===== UI routes (no DB or logic changes) =====
-from fastapi import Depends
-from fastapi.responses import HTMLResponse
-from sqlmodel import Session, select
 
-try:
-    # reuse existing objects from your app
-    from app.models import Product
-    from app.db import get_session
-    from app.main import TEMPLATES as _TEMPLATES  # if already created
-    TEMPLATES = _TEMPLATES
-except Exception:
-    # fallback if TEMPLATES is defined here
-    pass
-
-@app.get("/ui/products", response_class=HTMLResponse)
+# UI routes unchanged (lists use same data)
+from fastapi.responses import HTMLResponse as _HTML
+from sqlmodel import select as _select
+@app.get("/ui/products", response_class=_HTML)
 def products_page(page: int = 1, size: int = 50, session: Session = Depends(get_session)):
-    items = session.exec(select(Product)).all()
+    items = session.exec(_select(Product)).all()
     total = len(items)
     start, end = (page - 1) * size, (page - 1) * size + size
     template = TEMPLATES.get_template("products.html")
-    return template.render(
-        items=items[start:end],
-        total=total,
-        page=page,
-        size=size,
-        pages=(total + size - 1)//size or 1,
-        has_issues=False,
-        base_path="/ui/products",
-    )
+    return template.render(items=items[start:end], total=total, page=page, size=size, pages=(total + size - 1)//size or 1, has_issues=False, base_path="/ui/products")
 
-@app.get("/ui/issues", response_class=HTMLResponse)
+@app.get("/ui/issues", response_class=_HTML)
 def products_with_issues_page(page: int = 1, size: int = 50, session: Session = Depends(get_session)):
-    items = session.exec(select(Product)).all()
-    items = [p for p in items if getattr(p, "missing_price", False) or getattr(p, "missing_identifier", False) or getattr(p, "broken_image", False)]
+    items = session.exec(_select(Product)).all()
+    items = [p for p in items if getattr(p, "validation_result", None) != "OK"]
     total = len(items)
     start, end = (page - 1) * size, (page - 1) * size + size
     template = TEMPLATES.get_template("products.html")
-    return template.render(
-        items=items[start:end],
-        total=total,
-        page=page,
-        size=size,
-        pages=(total + size - 1)//size or 1,
-        has_issues=True,
-        base_path="/ui/issues",
-    )
-# ==============================================
+    return template.render(items=items[start:end], total=total, page=page, size=size, pages=(total + size - 1)//size or 1, has_issues=True, base_path="/ui/issues")
