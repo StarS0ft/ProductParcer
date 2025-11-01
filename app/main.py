@@ -56,8 +56,7 @@ async def _ingest_impl(session: Session):
     rows = list(rows_iter)
     log.info(f"Parsed {len(rows)} rows from CSV.")
 
-    # init progress
-    PROGRESS["running"] = True
+    # init progress (running was already set True in /ingest)
     PROGRESS["total"] = len(rows)
     PROGRESS["done"] = 0
     PROGRESS["summary"] = None
@@ -189,13 +188,18 @@ async def _ingest_impl(session: Session):
 
 @app.post("/ingest")
 async def ingest(session: Session = Depends(get_session)):
-    # prevent concurrent ingests (counter duplication)
+    # prevent concurrent ingests
     if INGEST_LOCK.locked() or PROGRESS.get("running"):
         return JSONResponse(
             {"status": "already_running", "total": PROGRESS["total"], "done": PROGRESS["done"]},
             status_code=202,
         )
     async with INGEST_LOCK:
+        # set running TRUE immediately to avoid UI race on first poll
+        PROGRESS["running"] = True
+        PROGRESS["done"] = 0
+        PROGRESS["total"] = 0
+        PROGRESS["summary"] = None
         try:
             out = await _ingest_impl(session)
             return JSONResponse(out)
