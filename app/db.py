@@ -1,5 +1,5 @@
 ﻿"""Database setup and session helpers.
-Cleanup only: docstrings/comments. No behavior changes.
+Adds safe column creation for validation status fields.
 """
 import os
 from typing import Generator
@@ -24,9 +24,18 @@ engine = create_engine(
 )
 
 def init_db() -> None:
-    """Create tables for registered SQLModel models."""
+    """Create tables and ensure new columns exist (idempotent)."""
+    # Ensure models are imported so tables are registered
     from . import models  # noqa: F401
     SQLModel.metadata.create_all(bind=engine)
+
+    # Idempotent column adds for existing product table.
+    # Keeps current DB approach; no migrations framework.
+    with engine.connect() as conn:
+        conn.exec_driver_sql("ALTER TABLE product ADD COLUMN IF NOT EXISTS ean_status TEXT")
+        conn.exec_driver_sql("ALTER TABLE product ADD COLUMN IF NOT EXISTS price_status TEXT")
+        conn.exec_driver_sql("ALTER TABLE product ADD COLUMN IF NOT EXISTS image_status TEXT")
+        conn.exec_driver_sql("ALTER TABLE product ADD COLUMN IF NOT EXISTS validation_result TEXT")
 
 def get_session() -> Generator[Session, None, None]:
     """Yield a SQLModel Session bound to the engine."""

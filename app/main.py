@@ -1,6 +1,7 @@
 ﻿"""FastAPI entrypoint for ProductParcer.
-Cleanup only: docstrings, comments, minor formatting and type hints.
-No logic, output, schema, or behavior changes.
+Adds explicit validation statuses and a final validation_result field.
+Uses validation_result for "products with issues" views.
+No behavior change to ingestion source/flow, concurrency, or DB engine.
 """
 import asyncio
 import logging
@@ -29,13 +30,11 @@ TEMPLATES = Environment(
     loader=FileSystemLoader(os.path.join(os.path.dirname(__file__), "templates"))
 )
 
-
 @app.on_event("startup")
 def _startup() -> None:
     """Initialize DB once on startup."""
     init_db()
     log.info("DB initialized.")
-
 
 def to_float(v: Any) -> Optional[float]:
     """Best-effort float parser used by ingestion mapping. Preserves existing behavior."""
@@ -47,7 +46,6 @@ def to_float(v: Any) -> Optional[float]:
     except Exception:
         return None
 
-
 def to_int(v: Any) -> Optional[int]:
     """Best-effort int parser used by ingestion mapping. Preserves existing behavior."""
     try:
@@ -55,9 +53,8 @@ def to_int(v: Any) -> Optional[int]:
     except Exception:
         return None
 
-
 async def _ingest_impl(session: Session) -> Dict[str, Any]:
-    """Fetch CSV, parse, validate, and store products. Behavior unchanged."""
+    """Fetch CSV, parse, validate, and store products. Behavior unchanged except for extra status fields."""
     log.info("Starting ingestion...")
     content = await fetch_csv_bytes()
     rows_iter = parse_semicolon_csv(content)
@@ -84,20 +81,37 @@ async def _ingest_impl(session: Session) -> Dict[str, Any]:
         }
 
     async def validate_and_build(p_dict: dict) -> Product:
-        # Flags and enrichment preserved exactly
+        # Flags and enrichment preserved; plus explicit status fields.
         p = Product(**p_dict)
-        p.missing_price = p.price is None or (
-            isinstance(p.price, (int, float)) and p.price <= 0
-        )
-        p.missing_identifier = is_identifier_missing(p.ean or "")
-        p.broken_image = not (await check_image_ok(p.image_url))
+
+        # Price status
+        missing_price = p.price is None or (isinstance(p.price, (int, float)) and p.price <= 0)
+        p.missing_price = missing_price
+        p.price_status = "missing" if missing_price else "ok"
+
+        # EAN status
+        missing_id = is_identifier_missing(p.ean or "")
+        p.missing_identifier = missing_id
+        if not p.ean or p.ean.strip() in {"-", "0", "None", ""}:
+            p.ean_status = "missing"
+        else:
+            p.ean_status = "wrong" if missing_id else "ok"
+
+        # Image status
+        ok_img = await check_image_ok(p.image_url)
+        p.broken_image = not ok_img
+        p.image_status = "ok" if ok_img else "broken"
+
+        # Final result
+        p.validation_result = "OK" if (p.price_status == "ok" and p.ean_status == "ok" and p.image_status == "ok") else "ISSUE"
+
+        # Title improvements / prompt — unchanged
         p.improved_title = heuristic_improve_title(p.name)
         p.ai_prompt = build_ai_prompt(p_dict["raw"])
         return p
 
     # Concurrency preserved
     sem = asyncio.Semaphore(16)
-
     async def guarded_validate(p_dict: dict) -> Product:
         async with sem:
             return await validate_and_build(p_dict)
@@ -112,9 +126,7 @@ async def _ingest_impl(session: Session) -> Dict[str, Any]:
         session.add(p)
     session.commit()
 
-    issues = sum(
-        1 for p in products if p.missing_price or p.missing_identifier or p.broken_image
-    )
+    issues = sum(1 for p in products if p.validation_result != "OK")
     example = next((p for p in products if p.improved_title), None)
 
     result = {
@@ -126,7 +138,6 @@ async def _ingest_impl(session: Session) -> Dict[str, Any]:
     log.info(f"Ingestion done: {result}")
     return result
 
-
 @app.post("/ingest")
 async def ingest(session: Session = Depends(get_session)):
     """POST endpoint to trigger ingestion."""
@@ -137,26 +148,23 @@ async def ingest(session: Session = Depends(get_session)):
         log.exception("Ingestion failed")
         return JSONResponse({"error": str(e)}, status_code=500)
 
-
 # Convenience for manual testing
 @app.get("/ingest")
 async def ingest_get(session: Session = Depends(get_session)):
     """GET variant that calls the same ingestion logic."""
     return await ingest(session)
 
-
 @app.get("/summary")
 def summary(session: Session = Depends(get_session)) -> Dict[str, Any]:
     """Return aggregated summary."""
     allp = session.exec(select(Product)).all()
-    flagged = [p for p in allp if p.missing_price or p.missing_identifier or p.broken_image]
+    flagged = [p for p in allp if (getattr(p, "validation_result", None) != "OK")]
     example = next((p for p in allp if p.improved_title), None)
     return {
         "number_of_products": len(allp),
         "number_flagged_with_issues": len(flagged),
         "example_improved_title": example.improved_title if example else None,
     }
-
 
 @app.get("/products")
 def products(
@@ -165,10 +173,10 @@ def products(
     size: int = 50,
     session: Session = Depends(get_session),
 ):
-    """List products, optionally filtered by issues."""
+    """List products, optionally filtered by validation_result."""
     items = session.exec(select(Product)).all()
     if has_issues:
-        items = [p for p in items if p.missing_price or p.missing_identifier or p.broken_image]
+        items = [p for p in items if getattr(p, "validation_result", None) != "OK"]
     start, end = (page - 1) * size, (page - 1) * size + size
     return {
         "page": page,
@@ -177,18 +185,15 @@ def products(
         "items": [p.dict() for p in items[start:end]],
     }
 
-
 @app.get("/", response_class=HTMLResponse)
 def home(session: Session = Depends(get_session)):
     """Home page with summary via Jinja2."""
     allp = session.exec(select(Product)).all()
-    flagged = [p for p in allp if p.missing_price or p.missing_identifier or p.broken_image]
+    flagged = [p for p in allp if getattr(p, "validation_result", None) != "OK"]
     template = TEMPLATES.get_template("summary.html")
     return template.render(total=len(allp), flagged=len(flagged))
 
-
-# ===== UI routes (no DB or logic changes) =====
-
+# ===== UI routes (no DB or logic changes except filtering source) =====
 @app.get("/ui/products", response_class=HTMLResponse)
 def products_page(
     page: int = 1,
@@ -210,22 +215,15 @@ def products_page(
         base_path="/ui/products",
     )
 
-
 @app.get("/ui/issues", response_class=HTMLResponse)
 def products_with_issues_page(
     page: int = 1,
     size: int = 50,
     session: Session = Depends(get_session),
 ):
-    """UI page for products flagged with issues."""
+    """UI page for products flagged with issues (uses validation_result)."""
     items = session.exec(select(Product)).all()
-    items = [
-        p
-        for p in items
-        if getattr(p, "missing_price", False)
-        or getattr(p, "missing_identifier", False)
-        or getattr(p, "broken_image", False)
-    ]
+    items = [p for p in items if getattr(p, "validation_result", None) != "OK"]
     total = len(items)
     start, end = (page - 1) * size, (page - 1) * size + size
     template = TEMPLATES.get_template("products.html")
