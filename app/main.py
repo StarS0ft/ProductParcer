@@ -10,7 +10,7 @@ from .db import init_db, get_session
 from .models import Product
 from .ingest import fetch_csv_bytes, parse_semicolon_csv
 from .validators import is_identifier_missing, check_image_ok
-from .ai_title import heuristic_improve_title, build_ai_prompt
+from .ai_title import heuristic_improve_title, build_ai_prompt, generate_title_suggestion_openai, build_llm_title_prompt
 from jinja2 import Environment, FileSystemLoader
 
 logging.basicConfig(level=logging.INFO)
@@ -111,8 +111,20 @@ async def _ingest_impl(session: Session):
         ) else "ISSUE"
 
         # unchanged helpers
-        p.improved_title = heuristic_improve_title(p.name)
-        p.ai_prompt = build_ai_prompt(p_dict["raw"])
+        p.improved_title = heuristic_improve_title(p.name)\n        p.ai_prompt = build_ai_prompt(p_dict["raw"])
+        # Try OpenAI only for weak/missed titles; safe fallback
+        if p.name_status in ("weak", "missed"):
+            try:
+                _resp = await generate_title_suggestion_openai(p_dict["raw"])
+                if _resp and isinstance(_resp, dict):
+                    q = (_resp.get("name_quality") or "").upper()
+                    if q in ("OK","WEAK","MISSED","CANT_GENERATE"):
+                        p.name_status = "OK" if q == "OK" else ("missed" if q == "MISSED" else "weak")
+                    sug = _resp.get("suggested_title")
+                    if isinstance(sug, str) and sug.strip():
+                        p.name_suggested = sug.strip()[:1024]
+            except Exception:
+                pass
         return p
 
     sem = asyncio.Semaphore(16)
@@ -206,3 +218,6 @@ def products_with_issues_page(page: int = 1, size: int = 50, session: Session = 
         has_issues=True,
         base_path="/ui/issues",
     )
+
+
+
