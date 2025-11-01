@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 import logging
 import os
 import re
@@ -60,7 +60,7 @@ def is_weak_title(name: str) -> bool:
     if t.lower() in generic:
         return True
     # very short alnum/code-like strings
-    if re.fullmatch(r"[A-Za-z0-9\-_/]{1,8}", t):
+    if re.fullmatch(r"[A-Za-z0-9\-\_/]{1,8}", t):
         return True
     return False
 
@@ -119,7 +119,41 @@ async def _ingest_impl(session: Session):
         else:
             p.name_status = "weak" if is_weak_title(p.name) else "OK"
 
-        # overall validation result
+        # helpers (always compute)
+        p.improved_title = heuristic_improve_title(p.name)
+        p.ai_prompt = build_ai_prompt(p_dict["raw"])
+
+        # LLM suggestion ONLY if weak/missed (never for OK)
+        # Also: only keep suggestion if final status remains weak/missed
+        if p.name_status in ("weak", "missed"):
+            try:
+                resp = await generate_title_suggestion_openai(p_dict["raw"])
+                if resp and isinstance(resp, dict):
+                    q = (resp.get("name_quality") or "").strip().lower()
+                    # normalize LLM decision onto our tri-state + cant_generate
+                    if q in ("ok", "weak", "missed", "cant_generate"):
+                        if q == "ok":
+                            # LLM considers current name fine; do NOT generate/keep suggestion
+                            p.name_status = "OK"
+                            p.name_suggested = None
+                        elif q == "weak":
+                            p.name_status = "weak"
+                        elif q == "missed":
+                            p.name_status = "missed"
+                        elif q == "cant_generate":
+                            # keep heuristic decision; no suggestion
+                            pass
+                    sug = resp.get("suggested_title")
+                    if p.name_status in ("weak", "missed") and isinstance(sug, str) and sug.strip():
+                        p.name_suggested = sug.strip()[:1024]
+                    else:
+                        # when status is OK or no valid suggestion, ensure empty
+                        p.name_suggested = None
+            except Exception:
+                # Never fail ingestion due to external API
+                pass
+
+        # overall validation result (computed AFTER possible LLM override)
         p.validation_result = (
             "OK"
             if (
@@ -130,27 +164,6 @@ async def _ingest_impl(session: Session):
             )
             else "ISSUE"
         )
-
-        # helpers
-        p.improved_title = heuristic_improve_title(p.name)
-        p.ai_prompt = build_ai_prompt(p_dict["raw"])
-
-        # Optional LLM suggestion for weak/missed titles (env-gated)
-        if p.name_status in ("weak", "missed"):
-            try:
-                resp = await generate_title_suggestion_openai(p_dict["raw"])
-                if resp and isinstance(resp, dict):
-                    q = (resp.get("name_quality") or "").upper()
-                    if q in ("OK", "WEAK", "MISSED", "CANT_GENERATE"):
-                        p.name_status = (
-                            "OK" if q == "OK" else ("missed" if q == "MISSED" else "weak")
-                        )
-                    sug = resp.get("suggested_title")
-                    if isinstance(sug, str) and sug.strip():
-                        p.name_suggested = sug.strip()[:1024]
-            except Exception:
-                # Never fail ingestion due to external API
-                pass
 
         return p
 
