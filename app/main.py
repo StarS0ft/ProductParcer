@@ -6,7 +6,7 @@ from fastapi import Depends, FastAPI, Query  # noqa: E402
 from fastapi.responses import HTMLResponse, JSONResponse  # noqa: E402
 from jinja2 import Environment, FileSystemLoader
 from sqlalchemy import text
-from sqlmodel import Session, select  # noqa: E402  # noqa: F811
+from sqlmodel import Session  # noqa: E402
 
 from .ai_title import build_ai_prompt, heuristic_improve_title
 from .db import get_session, init_db
@@ -179,7 +179,7 @@ def home(session: Session = Depends(get_session)):
 # ===== UI routes (no DB or logic changes) =====
 from fastapi import Depends  # noqa: E402
 from fastapi.responses import HTMLResponse  # noqa: E402
-from sqlmodel import Session, select  # noqa: E402  # noqa: F811
+from sqlmodel import Session  # noqa: E402
 
 try:
     # reuse existing objects from your app
