@@ -1,8 +1,11 @@
 ﻿import os
+import logging
 from typing import Generator
 
 from sqlalchemy import create_engine
 from sqlmodel import SQLModel, Session
+
+log = logging.getLogger("app.db")
 
 # Read from env. Fallback to local SQLite only if env var is missing.
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///data.db")
@@ -24,6 +27,16 @@ def init_db() -> None:
     # Ensure models are imported so tables are registered
     from . import models  # noqa
     SQLModel.metadata.create_all(bind=engine)
+
+    # Add status columns idempotently; never fail startup if dialect/perm differ
+    try:
+        with engine.begin() as conn:
+            conn.exec_driver_sql("ALTER TABLE product ADD COLUMN IF NOT EXISTS ean_status TEXT")
+            conn.exec_driver_sql("ALTER TABLE product ADD COLUMN IF NOT EXISTS price_status TEXT")
+            conn.exec_driver_sql("ALTER TABLE product ADD COLUMN IF NOT EXISTS image_status TEXT")
+            conn.exec_driver_sql("ALTER TABLE product ADD COLUMN IF NOT EXISTS validation_result TEXT")
+    except Exception as e:
+        log.warning("Skipping column ensure: %s", e)
 
 def get_session() -> Generator[Session, None, None]:
     with Session(engine) as session:
