@@ -13,8 +13,7 @@ from .validators import is_identifier_missing, check_image_ok
 from .ai_title import (
     heuristic_improve_title,
     build_ai_prompt,
-    generate_title_suggestion_openai,
-    build_llm_title_prompt,  # kept for completeness; not called directly here
+    generate_title_assessment_openai,
 )
 from jinja2 import Environment, FileSystemLoader
 
@@ -48,21 +47,6 @@ def to_int(v):
         return int(str(v).split(",")[0].strip())
     except Exception:
         return None
-
-
-def is_weak_title(name: str) -> bool:
-    t = (name or "").strip()
-    if not t:
-        return False
-    if len(t) < 6:
-        return True
-    generic = {"produkt", "product", "unknown", "n/a", "na"}
-    if t.lower() in generic:
-        return True
-    # very short alnum/code-like strings
-    if re.fullmatch(r"[A-Za-z0-9\-\_/]{1,8}", t):
-        return True
-    return False
 
 
 async def _ingest_impl(session: Session):
@@ -113,47 +97,51 @@ async def _ingest_impl(session: Session):
         p.broken_image = not ok_img
         p.image_status = "ok" if ok_img else "broken"
 
-        # title validation (pre-LLM)
-        if not p.name or not p.name.strip():
-            p.name_status = "missed"
-        else:
-            p.name_status = "weak" if is_weak_title(p.name) else "OK"
-
         # helpers (always compute)
         p.improved_title = heuristic_improve_title(p.name)
-        p.ai_prompt = build_ai_prompt(p_dict["raw"])
+        p.ai_prompt = build_ai_prompt(p_dict["raw"], "")
 
-        # LLM suggestion ONLY if weak/missed (never for OK)
-        # Also: only keep suggestion if final status remains weak/missed
-        if p.name_status in ("weak", "missed"):
-            try:
-                resp = await generate_title_suggestion_openai(p_dict["raw"])
-                if resp and isinstance(resp, dict):
-                    q = (resp.get("name_quality") or "").strip().lower()
-                    # normalize LLM decision onto our tri-state + cant_generate
-                    if q in ("ok", "weak", "missed", "cant_generate"):
-                        if q == "ok":
-                            # LLM considers current name fine; do NOT generate/keep suggestion
-                            p.name_status = "OK"
-                            p.name_suggested = None
-                        elif q == "weak":
-                            p.name_status = "weak"
-                        elif q == "missed":
-                            p.name_status = "missed"
-                        elif q == "cant_generate":
-                            # keep heuristic decision; no suggestion
-                            pass
-                    sug = resp.get("suggested_title")
-                    if p.name_status in ("weak", "missed") and isinstance(sug, str) and sug.strip():
-                        p.name_suggested = sug.strip()[:1024]
-                    else:
-                        # when status is OK or no valid suggestion, ensure empty
-                        p.name_suggested = None
-            except Exception:
-                # Never fail ingestion due to external API
-                pass
+        # Always ask AI to assess title quality using feed fields + fetched page content.
+        # Result mapping:
+        #   ok -> name_status="OK", no name_suggested
+        #   weak -> name_status="weak", keep suggested
+        #   empty -> name_status="empty", keep suggested
+        #   cant_generate/None -> fallback: empty if no name else OK
+        try:
+            assess = await generate_title_assessment_openai(p_dict["raw"])
+        except Exception:
+            assess = None
 
-        # overall validation result (computed AFTER possible LLM override)
+        if assess and isinstance(assess, dict):
+            q = (assess.get("name_quality") or "").strip().lower()
+            sug = assess.get("suggested_title")
+            if q == "ok":
+                p.name_status = "OK"
+                p.name_suggested = None
+            elif q == "weak":
+                p.name_status = "weak"
+                p.name_suggested = (sug or "").strip()[:1024] if isinstance(sug, str) and sug.strip() else None
+            elif q == "empty":
+                p.name_status = "empty"
+                p.name_suggested = (sug or "").strip()[:1024] if isinstance(sug, str) and sug.strip() else None
+            else:
+                # cant_generate or unexpected -> fallback
+                if not p.name or not str(p.name).strip():
+                    p.name_status = "empty"
+                    p.name_suggested = None
+                else:
+                    p.name_status = "OK"
+                    p.name_suggested = None
+        else:
+            # API failed -> fallback based on presence of name only
+            if not p.name or not str(p.name).strip():
+                p.name_status = "empty"
+                p.name_suggested = None
+            else:
+                p.name_status = "OK"
+                p.name_suggested = None
+
+        # overall validation result (after AI decision)
         p.validation_result = (
             "OK"
             if (
@@ -167,7 +155,8 @@ async def _ingest_impl(session: Session):
 
         return p
 
-    sem = asyncio.Semaphore(16)
+    # Tune concurrency to be polite with APIs
+    sem = asyncio.Semaphore(8)
 
     async def guarded_validate(p_dict: dict) -> Product:
         async with sem:
