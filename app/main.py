@@ -169,3 +169,40 @@ def home(session: Session = Depends(get_session)):
     flagged = [p for p in allp if getattr(p, "validation_result", None) != "OK"]
     template = TEMPLATES.get_template("summary.html")
     return template.render(total=len(allp), flagged=len(flagged))
+
+
+from fastapi.responses import HTMLResponse as _HTML
+from sqlmodel import select as _select
+
+@app.get("/ui/products", response_class=_HTML)
+def products_page(page: int = 1, size: int = 50, session: Session = Depends(get_session)):
+    items = session.exec(_select(Product)).all()
+    total = len(items)
+    start, end = (page - 1) * size, (page - 1) * size + size
+    template = TEMPLATES.get_template("products.html")
+    return template.render(
+        items=items[start:end],
+        total=total,
+        page=page,
+        size=size,
+        pages=(total + size - 1)//size or 1,
+        has_issues=False,
+        base_path="/ui/products",
+    )
+
+@app.get("/ui/issues", response_class=_HTML)
+def products_with_issues_page(page: int = 1, size: int = 50, session: Session = Depends(get_session)):
+    items = session.exec(_select(Product)).all()
+    items = [p for p in items if getattr(p, "validation_result", None) != "OK"]
+    total = len(items)
+    start, end = (page - 1) * size, (page - 1) * size + size
+    template = TEMPLATES.get_template("products.html")
+    return template.render(
+        items=items[start:end],
+        total=total,
+        page=page,
+        size=size,
+        pages=(total + size - 1)//size or 1,
+        has_issues=True,
+        base_path="/ui/issues",
+    )
