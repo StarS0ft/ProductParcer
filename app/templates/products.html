@@ -12,88 +12,104 @@
     <div class="text-sm text-slate-500">Page {{ page }} of {{ pages }}</div>
   </div>
 
-  <div class="overflow-x-auto">
-    <table class="min-w-full text-xs table-fixed">
-      <thead class="text-left bg-slate-100">
-        <tr>
-          <th class="px-2 py-2 whitespace-nowrap" style="width:72px">Artnr</th>
-          <th class="px-2 py-2">Category</th>
-          <th class="px-2 py-2 w-52">Name</th>
-          <th class="px-2 py-2">Manufacturer</th>
-          <th class="px-2 py-2">Model</th>
-          <th class="px-2 py-2">EAN</th>
-          <th class="px-2 py-2">Stock</th>
-          <th class="px-2 py-2">Price</th>
-          <th class="px-2 py-2">Shipping</th>
+  <table class="min-w-full text-xs table-fixed">
+    <!-- Hard sizes to fit within container width; flexible columns use percentages -->
+    <colgroup>
+      <col style="width:72px">          {# 1 Artnr #}
+      <col style="width:14%">           {# 2 Category #}
+      <col style="width:18%">           {# 3 Name #}
+      <col style="width:10%">           {# 4 Manufacturer #}
+      <col style="width:10%">           {# 5 Model #}
+      <col style="width:12%">           {# 6 EAN #}
+      <col style="width:64px">          {# 7 Stock #}
+      <col style="width:72px">          {# 8 Price #}
+      <col style="width:72px">          {# 9 Shipping #}
+      <col style="width:72px">          {# 10 Title status #}
+      <col style="width:18%">           {# 11 Suggested title #}
+      <col style="width:56px">          {# 12 AI #}
+      <col style="width:72px">          {# 13 EAN status #}
+      <col style="width:72px">          {# 14 Price status #}
+      <col style="width:72px">          {# 15 Image status #}
+      <col style="width:84px">          {# 16 Result #}
+      <col style="width:56px">          {# 17 URL #}
+    </colgroup>
 
-          <!-- NEW title-related columns -->
-          <th class="px-2 py-2 w-16 text-center">Title</th>
-          <th class="px-2 py-2 w-64">Suggested title</th>
-          <th class="px-2 py-2 w-14 text-center">AI</th>
+    <thead class="text-left bg-slate-100">
+      <tr>
+        <th class="px-2 py-2 whitespace-nowrap">Artnr</th>
+        <th class="px-2 py-2">Category</th>
+        <th class="px-2 py-2">Name</th>
+        <th class="px-2 py-2">Manufacturer</th>
+        <th class="px-2 py-2">Model</th>
+        <th class="px-2 py-2">EAN</th>
+        <th class="px-2 py-2">Stock</th>
+        <th class="px-2 py-2">Price</th>
+        <th class="px-2 py-2">Shipping</th>
 
-          <!-- Existing validation status columns -->
-          <th class="px-2 py-2 w-16 text-center">EAN</th>
-          <th class="px-2 py-2 w-16 text-center">Price</th>
-          <th class="px-2 py-2 w-16 text-center">Image</th>
-          <th class="px-2 py-2 w-20 text-center">Result</th>
-          <th class="px-2 py-2 w-14 text-center">URL</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for p in items %}
-        <tr class="border-b last:border-0">
-          <td class="px-2 py-1 whitespace-nowrap w-12">{{ p.artnr or "" }}</td>
-          <td class="px-2 py-1">{{ p.category or "" }}</td>
-          <td class="px-2 py-1 whitespace-normal max-w-[13rem]">{{ p.name or "" }}</td>
-          <td class="px-2 py-1">{{ p.manufacturer or "" }}</td>
-          <td class="px-2 py-1">{{ p.model or "" }}</td>
-          <td class="px-2 py-1">{{ p.ean or "" }}</td>
-          <td class="px-2 py-1">{{ p.stock if p.stock is not none else "" }}</td>
-          <td class="px-2 py-1">{{ "%.2f"|format(p.price) if p.price is not none else "" }}</td>
-          <td class="px-2 py-1">{{ "%.2f"|format(p.shipping) if p.shipping is not none else "" }}</td>
+        <th class="px-2 py-2 text-center">Title</th>
+        <th class="px-2 py-2">Suggested title</th>
+        <th class="px-2 py-2 text-center">AI</th>
 
-          <!-- NEW: Title status + Suggested + AI prompt (tooltip) -->
-          <td class="px-2 py-1 text-center w-16">
-            {% set ns = (p.name_status or "") %}
-            <span class="{{ 'text-emerald-700' if ns|lower == 'ok' else 'text-amber-700' }}">{{ ns }}</span>
-          </td>
-          <td class="px-2 py-1 whitespace-normal max-w-[16rem]">
-            {{ p.name_suggested or "" }}
-          </td>
-          <td class="px-2 py-1 text-center w-14">
-            {% if p.ai_prompt %}
-              <a class="text-indigo-700 hover:underline" title="{{ p.ai_prompt }}">view</a>
-            {% else %}
-              <span class="text-slate-400">-</span>
-            {% endif %}
-          </td>
+        <th class="px-2 py-2 text-center">EAN</th>
+        <th class="px-2 py-2 text-center">Price</th>
+        <th class="px-2 py-2 text-center">Image</th>
+        <th class="px-2 py-2 text-center">Result</th>
+        <th class="px-2 py-2 text-center">URL</th>
+      </tr>
+    </thead>
 
-          <!-- Existing compact statuses -->
-          <td class="px-2 py-1 text-center w-16">
-            <span class="{{ 'text-emerald-700' if p.ean_status == 'ok' else 'text-amber-700' }}">{{ p.ean_status or "" }}</span>
-          </td>
-          <td class="px-2 py-1 text-center w-16">
-            <span class="{{ 'text-emerald-700' if p.price_status == 'ok' else 'text-amber-700' }}">{{ p.price_status or "" }}</span>
-          </td>
-          <td class="px-2 py-1 text-center w-16">
-            <span class="{{ 'text-emerald-700' if p.image_status == 'ok' else 'text-amber-700' }}">{{ p.image_status or "" }}</span>
-          </td>
-          <td class="px-2 py-1 text-center w-20 font-semibold {{ 'text-emerald-700' if p.validation_result == 'OK' else 'text-amber-700' }}">
-            {{ p.validation_result or "" }}
-          </td>
+    <tbody>
+      {% for p in items %}
+      <tr class="border-b last:border-0">
+        <td class="px-2 py-1 whitespace-nowrap">{{ p.artnr or "" }}</td>
+        <td class="px-2 py-1 truncate">{{ p.category or "" }}</td>
+        <td class="px-2 py-1 whitespace-normal break-words">{{ p.name or "" }}</td>
+        <td class="px-2 py-1 truncate">{{ p.manufacturer or "" }}</td>
+        <td class="px-2 py-1 truncate">{{ p.model or "" }}</td>
+        <td class="px-2 py-1 truncate">{{ p.ean or "" }}</td>
+        <td class="px-2 py-1 text-right">{{ p.stock if p.stock is not none else "" }}</td>
+        <td class="px-2 py-1 text-right">{{ "%.2f"|format(p.price) if p.price is not none else "" }}</td>
+        <td class="px-2 py-1 text-right">{{ "%.2f"|format(p.shipping) if p.shipping is not none else "" }}</td>
 
-          <td class="px-2 py-1 text-center w-14">
-            {% if p.url %}
-              <a class="text-indigo-700 hover:underline" href="{{ p.url }}" target="_blank">open</a>
-            {% else %}
-              <span class="text-slate-400">-</span>
-            {% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
+        <td class="px-2 py-1 text-center">
+          {% set ns = (p.name_status or "") %}
+          <span class="{{ 'text-emerald-700' if ns|lower == 'ok' else 'text-amber-700' }}">{{ ns }}</span>
+        </td>
+        <td class="px-2 py-1 whitespace-normal break-words">
+          {{ p.name_suggested or "" }}
+        </td>
+        <td class="px-2 py-1 text-center">
+          {% if p.ai_prompt %}
+            <a class="text-indigo-700 hover:underline" title="{{ p.ai_prompt }}">view</a>
+          {% else %}
+            <span class="text-slate-400">-</span>
+          {% endif %}
+        </td>
+
+        <td class="px-2 py-1 text-center">
+          <span class="{{ 'text-emerald-700' if p.ean_status == 'ok' else 'text-amber-700' }}">{{ p.ean_status or "" }}</span>
+        </td>
+        <td class="px-2 py-1 text-center">
+          <span class="{{ 'text-emerald-700' if p.price_status == 'ok' else 'text-amber-700' }}">{{ p.price_status or "" }}</span>
+        </td>
+        <td class="px-2 py-1 text-center">
+          <span class="{{ 'text-emerald-700' if p.image_status == 'ok' else 'text-amber-700' }}">{{ p.image_status or "" }}</span>
+        </td>
+        <td class="px-2 py-1 text-center font-semibold {{ 'text-emerald-700' if p.validation_result == 'OK' else 'text-amber-700' }}">
+          {{ p.validation_result or "" }}
+        </td>
+
+        <td class="px-2 py-1 text-center">
+          {% if p.url %}
+            <a class="text-indigo-700 hover:underline" href="{{ p.url }}" target="_blank">open</a>
+          {% else %}
+            <span class="text-slate-400">-</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
 
   <div class="mt-4 flex items-center gap-2">
     {% if page > 1 %}
@@ -112,5 +128,3 @@
   </div>
 </div>
 {% endblock %}
-
-
