@@ -16,7 +16,7 @@
     <table class="min-w-full text-xs">
       <thead class="text-left bg-slate-100">
         <tr>
-          <th class="px-2 py-2">Artnr</th>
+          <th class="px-2 py-2 w-12">Artnr</th>
           <th class="px-2 py-2">Category</th>
           <th class="px-2 py-2 w-52">Name</th>
           <th class="px-2 py-2">Manufacturer</th>
@@ -42,7 +42,7 @@
       <tbody>
         {% for p in items %}
         <tr class="border-b last:border-0">
-          <td class="px-2 py-1 whitespace-nowrap">{{ p.artnr or "" }}</td>
+          <td class="px-2 py-1 whitespace-nowrap w-12">{{ p.artnr or "" }}</td>
           <td class="px-2 py-1">{{ p.category or "" }}</td>
           <td class="px-2 py-1 whitespace-normal max-w-[13rem]">{{ p.name or "" }}</td>
           <td class="px-2 py-1">{{ p.manufacturer or "" }}</td>
