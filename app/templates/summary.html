@@ -33,7 +33,7 @@
           <path class="opacity-75" d="M4 12a8 8 0 018-8" stroke="currentColor" stroke-width="4"></path>
         </svg>
         <div class="flex flex-col">
-          <span id="ingest-text" class="text-sm text-slate-600">Import in progress...</span>
+          <span id="ingest-text" class="text-sm text-slate-600">Import and AI analysis in progress...</span>
           <span id="ingest-counter" class="text-xs text-slate-500 mt-0.5">Imported 0 of 0 items</span>
         </div>
       </div>
@@ -59,7 +59,7 @@ async function runIngest(){
   btn.disabled = true;
   resBox.classList.add('hidden');
   box.classList.remove('hidden');
-  txt.textContent = 'Import in progress...';
+  txt.textContent = 'Import and AI analysis in progress...';
   counter.textContent = 'Imported 0 of 0 items';
 
   // Start polling /progress immediately (do not wait for POST to finish)
@@ -122,3 +122,4 @@ async function runIngest(){
 }
 </script>
 {% endblock %}
+
