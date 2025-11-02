@@ -1,4 +1,4 @@
-import os
+﻿import os
 import re
 import json
 import logging
@@ -28,7 +28,7 @@ async def _fetch_url_text(url: str | None, timeout_sec: int = 8, max_chars: int 
 
 def _build_assess_prompt(row: dict, page_excerpt: str) -> str:
     return (
-        "Task: Evaluate the current product title and, if needed, propose a better one.\n"
+        "Task: Evaluate the current product title and, if it is weak or unclear, propose a better one.\n"
         "Return STRICT JSON: {\"name_quality\":\"ok|weak|empty|cant_generate\",\"suggested_title\":null|string}.\n"
         "Rules:\n"
         "- Keep original language (Swedish stays Swedish).\n"
