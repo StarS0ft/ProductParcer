@@ -12,31 +12,19 @@
     <div class="text-sm text-slate-500">Page {{ page }} of {{ pages }}</div>
   </div>
 
-  <table class="min-w-full text-xs table-fixed">
-    <!-- Hard sizes to fit within container width; flexible columns use percentages -->
-    <colgroup>
-      <col style="width:72px">          {# 1 Artnr #}
-      <col style="width:14%">           {# 2 Category #}
-      <col style="width:18%">           {# 3 Name #}
-      <col style="width:10%">           {# 4 Manufacturer #}
-      <col style="width:10%">           {# 5 Model #}
-      <col style="width:12%">           {# 6 EAN #}
-      <col style="width:64px">          {# 7 Stock #}
-      <col style="width:72px">          {# 8 Price #}
-      <col style="width:72px">          {# 9 Shipping #}
-      <col style="width:72px">          {# 10 Title status #}
-      <col style="width:18%">           {# 11 Suggested title #}
-      <col style="width:56px">          {# 12 AI #}
-      <col style="width:72px">          {# 13 EAN status #}
-      <col style="width:72px">          {# 14 Price status #}
-      <col style="width:72px">          {# 15 Image status #}
-      <col style="width:84px">          {# 16 Result #}
-      <col style="width:56px">          {# 17 URL #}
-    </colgroup>
+  <!-- Only narrow the first column (Artnr). No other layout changes. -->
+  <style>
+    #data-table th:nth-child(1),
+    #data-table td:nth-child(1){
+      width:64px; max-width:64px;
+      white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    }
+  </style>
 
+  <table id="data-table" class="min-w-full text-xs">
     <thead class="text-left bg-slate-100">
       <tr>
-        <th class="px-2 py-2 whitespace-nowrap">Artnr</th>
+        <th class="px-2 py-2">Artnr</th>
         <th class="px-2 py-2">Category</th>
         <th class="px-2 py-2">Name</th>
         <th class="px-2 py-2">Manufacturer</th>
@@ -45,11 +33,9 @@
         <th class="px-2 py-2">Stock</th>
         <th class="px-2 py-2">Price</th>
         <th class="px-2 py-2">Shipping</th>
-
         <th class="px-2 py-2 text-center">Title</th>
         <th class="px-2 py-2">Suggested title</th>
         <th class="px-2 py-2 text-center">AI</th>
-
         <th class="px-2 py-2 text-center">EAN</th>
         <th class="px-2 py-2 text-center">Price</th>
         <th class="px-2 py-2 text-center">Image</th>
@@ -61,7 +47,7 @@
     <tbody>
       {% for p in items %}
       <tr class="border-b last:border-0">
-        <td class="px-2 py-1 whitespace-nowrap">{{ p.artnr or "" }}</td>
+        <td class="px-2 py-1">{{ p.artnr or "" }}</td>
         <td class="px-2 py-1 truncate">{{ p.category or "" }}</td>
         <td class="px-2 py-1 whitespace-normal break-words">{{ p.name or "" }}</td>
         <td class="px-2 py-1 truncate">{{ p.manufacturer or "" }}</td>
@@ -98,7 +84,6 @@
         <td class="px-2 py-1 text-center font-semibold {{ 'text-emerald-700' if p.validation_result == 'OK' else 'text-amber-700' }}">
           {{ p.validation_result or "" }}
         </td>
-
         <td class="px-2 py-1 text-center">
           {% if p.url %}
             <a class="text-indigo-700 hover:underline" href="{{ p.url }}" target="_blank">open</a>
